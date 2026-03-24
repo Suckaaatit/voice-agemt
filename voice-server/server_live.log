@@ -1,0 +1,10 @@
+OPENAI_API_KEY not set — fallback will be used
+UPSTASH_REDIS_URL not set — fallback will be used
+INFO:     Started server process [15252]
+INFO:     Waiting for application startup.
+2026-03-24 01:58:24 INFO voice-server: Voice server started — max 10 concurrent calls
+INFO:     Application startup complete.
+ERROR:    [Errno 10048] error while attempting to bind on address ('0.0.0.0', 8080): only one usage of each socket address (protocol/network address/port) is normally permitted
+INFO:     Waiting for application shutdown.
+2026-03-24 01:58:24 INFO voice-server: Voice server shut down
+INFO:     Application shutdown complete.
