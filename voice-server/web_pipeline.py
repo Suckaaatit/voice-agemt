@@ -284,7 +284,7 @@ class WebPipeline:
                 # that are long enough to be real user speech (not echo)
                 # Echo from speakers is typically short fragments. Real interrupts are longer.
                 if self._speaking.is_set():
-                    if is_final and speech_final and len(transcript) > 15:
+                    if is_final and speech_final and len(transcript) > 25:
                         # Check if this is echo (matches agent's last speech) or real user
                         is_echo = False
                         if self._last_agent_text:
@@ -292,7 +292,7 @@ class WebPipeline:
                             user_words = set(transcript.lower().split())
                             if agent_words and user_words:
                                 overlap = len(agent_words & user_words) / len(user_words)
-                                if overlap > 0.5:
+                                if overlap > 0.3:  # Even 30% overlap is likely echo
                                     is_echo = True
                                     logger.debug("Echo detected (%.0f%% overlap): '%s'", overlap * 100, transcript[:40])
 
@@ -516,12 +516,14 @@ class WebPipeline:
         if len(self._last_3_responses) > 3:
             self._last_3_responses.pop(0)
 
-        self.conversation.append({"role": "assistant", "content": text})
+        # Strip emotion tags before storing/displaying (TTS handles them separately)
+        clean_text = EMOTION_TAG_RE.sub("", text).strip()
+        self.conversation.append({"role": "assistant", "content": clean_text})
         # Trim conversation to keep latency constant across turns
         if len(self.conversation) > SLIDING_WINDOW:
             self.conversation = self.conversation[-SLIDING_WINDOW:]
-        await self._send_event("transcript", {"role": "agent", "text": text})
-        await self._speak(text)
+        await self._send_event("transcript", {"role": "agent", "text": clean_text})
+        await self._speak(text)  # TTS gets original with tags for emotion
         self._turn_count += 1
 
     async def _respond_streaming(self, user_text: str):
@@ -715,11 +717,12 @@ class WebPipeline:
                 self._last_3_responses.append(full_response)
                 if len(self._last_3_responses) > 3:
                     self._last_3_responses.pop(0)
-                self.conversation.append({"role": "assistant", "content": full_response})
+                clean_response = EMOTION_TAG_RE.sub("", full_response).strip()
+                self.conversation.append({"role": "assistant", "content": clean_response})
                 # Trim conversation to keep latency constant
                 if len(self.conversation) > SLIDING_WINDOW:
                     self.conversation = self.conversation[-SLIDING_WINDOW:]
-                await self._send_event("transcript", {"role": "agent", "text": full_response})
+                await self._send_event("transcript", {"role": "agent", "text": clean_response})
                 self._turn_count += 1
             else:
                 logger.warning("Skipping duplicate response: '%s'", full_response[:50])
