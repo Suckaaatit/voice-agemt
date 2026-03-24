@@ -7,7 +7,7 @@ export async function POST(_: NextRequest) {
   try {
     const sessionId = randomUUID();
     // Voice server WebSocket URL — uses custom pipeline, not Retell
-    const voiceServerUrl = process.env.VOICE_SERVER_URL || "ws://localhost:8087";
+    const voiceServerUrl = process.env.VOICE_SERVER_URL || "wss://voice-agemt.onrender.com";
     const wsUrl = `${voiceServerUrl}/ws/web-call/${sessionId}`;
 
     return NextResponse.json({
