@@ -15,8 +15,6 @@ REQUIRED_VARS = [
     "TWILIO_AUTH_TOKEN",
     "TWILIO_PHONE_NUMBER",
     "DEEPGRAM_API_KEY",
-    "ELEVENLABS_API_KEY",
-    "ELEVENLABS_VOICE_ID",
     "GROQ_API_KEY",
     "LLM_MODEL",
     "VERCEL_API_URL",
@@ -25,13 +23,17 @@ REQUIRED_VARS = [
 
 # These have fallbacks so they're not strictly required
 OPTIONAL_FALLBACK_VARS = {
+    "ELEVENLABS_API_KEY": "",       # ElevenLabs TTS (backup)
+    "ELEVENLABS_VOICE_ID": "",      # ElevenLabs voice ID
     "OPENAI_API_KEY": "",           # fallback LLM — Groq is primary
     "UPSTASH_REDIS_URL": "",        # falls back to Supabase polling
     "SERVER_BASE_URL": "http://localhost:8080",  # ngrok URL for prod
-    "CARTESIA_API_KEY": "",         # Cartesia TTS (alternative to ElevenLabs)
+    "CARTESIA_API_KEY": "",         # Cartesia TTS (primary)
     "CARTESIA_VOICE_ID": "",        # Cartesia voice ID
     "GEMINI_API_KEY": "",           # Google Gemini (fallback LLM)
-    "SAMBANOVA_API_KEY": "",        # SambaNova (primary LLM — fast, no rate limit issues)
+    "SAMBANOVA_API_KEY": "",        # SambaNova (fallback LLM)
+    "RESEND_API_KEY": "",           # Resend email
+    "STRIPE_WEBHOOK_SECRET": "",    # Stripe payments
 }
 
 OPTIONAL_DEFAULTS = {
