@@ -76,6 +76,17 @@ def _verify_agent_secret(request: Request):
 
 # ─── Health ──────────────────────────────────────────────────────────
 
+@app.get("/debug/config")
+async def debug_config():
+    return {
+        "server_base_url": config.get("server_base_url", "NOT SET"),
+        "has_twilio": bool(config.get("twilio_account_sid")),
+        "has_deepgram": bool(config.get("deepgram_api_key")),
+        "has_groq": bool(config.get("groq_api_key")),
+        "has_cartesia": bool(config.get("cartesia_api_key")),
+        "llm_model": config.get("llm_model", "NOT SET"),
+    }
+
 @app.get("/health")
 async def health():
     return {
@@ -201,15 +212,23 @@ async def initiate_call(request: Request):
 
 @app.post("/api/twilio/voice")
 async def twilio_voice(request: Request):
-    form = await request.form()
-    call_sid = form.get("CallSid", "")
-    call_id = request.query_params.get("call_id", call_sid)
+    try:
+        form = await request.form()
+        call_sid = form.get("CallSid", "unknown")
+        call_id = request.query_params.get("call_id", call_sid)
 
-    base = config["server_base_url"]
-    # Convert https:// to wss:// for WebSocket
-    ws_base = base.replace("https://", "wss://").replace("http://", "ws://")
+        base = config.get("server_base_url", "")
+        if not base:
+            logger.error("SERVER_BASE_URL not set!")
+            return Response(
+                content='<?xml version="1.0"?><Response><Say>Server configuration error.</Say></Response>',
+                media_type="application/xml",
+            )
 
-    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        # Convert https:// to wss:// for WebSocket
+        ws_base = base.replace("https://", "wss://").replace("http://", "ws://")
+
+        twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
         <Stream url="{ws_base}/ws/voice/{call_sid}">
@@ -218,7 +237,14 @@ async def twilio_voice(request: Request):
     </Connect>
 </Response>"""
 
-    return Response(content=twiml, media_type="application/xml")
+        logger.info("TwiML generated for %s → %s/ws/voice/%s", call_id, ws_base, call_sid)
+        return Response(content=twiml, media_type="application/xml")
+    except Exception as e:
+        logger.error("twilio_voice crashed: %s", e, exc_info=True)
+        return Response(
+            content='<?xml version="1.0"?><Response><Say>Technical error. Please try again.</Say></Response>',
+            media_type="application/xml",
+        )
 
 
 # ─── Twilio TwiML: Fallback ─────────────────────────────────────────
