@@ -37,6 +37,10 @@ export default function AgentPage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [vadLog, setVadLog] = useState<Array<{ ts: number; event: string; detail?: string }>>([]);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [phoneName, setPhoneName] = useState("");
+  const [phoneCallStatus, setPhoneCallStatus] = useState<"idle" | "calling" | "connected" | "ended" | "error">("idle");
+  const [phoneCallId, setPhoneCallId] = useState<string | null>(null);
 
   // Refs for WebSocket + Audio
   const wsRef = useRef<WebSocket | null>(null);
@@ -319,6 +323,32 @@ export default function AgentPage() {
     }
   };
 
+  // ─── Quick-Dial Phone Call ──────────────────────────────────────
+  const makePhoneCall = async () => {
+    const trimmed = phoneNumber.trim();
+    if (!trimmed || !/^\+[1-9]\d{6,14}$/.test(trimmed)) {
+      toast.error("Enter a valid phone number in E.164 format (e.g. +14155551234)");
+      return;
+    }
+    setPhoneCallStatus("calling");
+    setPhoneCallId(null);
+    try {
+      const res = await fetch("/api/voice/call-phone", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: trimmed, name: phoneName.trim() || "Quick Call" }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Call failed");
+      setPhoneCallId(data.call_id);
+      setPhoneCallStatus("connected");
+      toast.success(`Calling ${trimmed}...`);
+    } catch (err) {
+      setPhoneCallStatus("error");
+      toast.error(err instanceof Error ? err.message : "Call failed");
+    }
+  };
+
   // ─── Cleanup on unmount ────────────────────────────────────────
   useEffect(() => {
     return () => {
@@ -507,6 +537,50 @@ export default function AgentPage() {
               {emailSent ? <p className="mt-3 text-xs text-[var(--green)]">Payment link email sent!</p> : null}
             </div>
           ) : null}
+
+          {/* ─── Quick-Dial Phone Call ─── */}
+          <div className="mb-8 rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.02)] p-6">
+            <h3 className="mb-1 text-sm font-semibold text-white">Call a Phone Number</h3>
+            <p className="mb-4 text-xs text-[var(--text-muted)]">Adam will call this number and run the sales script.</p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex-1">
+                <label className="mb-1 block text-xs text-[var(--text-muted)]" htmlFor="phone-number">Phone Number (E.164)</label>
+                <Input
+                  id="phone-number"
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  placeholder="+14155551234"
+                  type="tel"
+                  value={phoneNumber}
+                  disabled={phoneCallStatus === "calling"}
+                />
+              </div>
+              <div className="w-full sm:w-48">
+                <label className="mb-1 block text-xs text-[var(--text-muted)]" htmlFor="phone-name">Name (optional)</label>
+                <Input
+                  id="phone-name"
+                  onChange={(e) => setPhoneName(e.target.value)}
+                  placeholder="John"
+                  type="text"
+                  value={phoneName}
+                  disabled={phoneCallStatus === "calling"}
+                />
+              </div>
+              <Button
+                className="h-10 min-w-[140px] bg-[var(--green)] text-white hover:bg-[#2dd4a0]"
+                disabled={phoneCallStatus === "calling" || !phoneNumber.trim()}
+                onClick={() => void makePhoneCall()}
+                type="button"
+              >
+                {phoneCallStatus === "calling" ? "Calling..." : "Call Now"}
+              </Button>
+            </div>
+            {phoneCallStatus === "connected" && phoneCallId ? (
+              <p className="mt-3 text-xs text-[var(--green)]">Call initiated! ID: {phoneCallId}</p>
+            ) : null}
+            {phoneCallStatus === "error" ? (
+              <p className="mt-3 text-xs text-red-400">Call failed. Check the phone number and try again.</p>
+            ) : null}
+          </div>
 
           <VoiceTester />
         </div>
