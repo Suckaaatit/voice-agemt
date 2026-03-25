@@ -350,6 +350,15 @@ class WebPipeline:
 
                 # ── Process final transcript ──
                 if is_final and speech_final:
+                    # Greeting echo dedup: skip if transcript matches the greeting
+                    greeting_words = set(GREETING.lower().split())
+                    t_words = set(transcript.lower().split())
+                    if greeting_words and t_words:
+                        greeting_overlap = len(greeting_words & t_words) / max(len(t_words), 1)
+                        if greeting_overlap > 0.5:
+                            logger.info("Greeting echo filtered: '%s'", transcript[:40])
+                            continue
+
                     self.is_first_response = False
                     self._last_speech = time.time()
                     self._stt_done_time = time.time()  # latency tracking
@@ -1034,27 +1043,40 @@ Only one tag per response. Tag goes FIRST, before the text.
     # ─── ElevenLabs TTS ────────────────────────────────────────────
 
     async def _speak(self, text: str):
-        """Generate TTS and send audio to browser."""
+        """Generate TTS and send audio to browser/phone."""
+        logger.info("Speaking: '%s'", text[:60])
         self._interrupt.clear()
         self._speaking.set()
         self._agent_speak_start = time.time()
         self._last_agent_text = text
         await self._send_event("agent_talking", {"value": True})
+        # Start suppressing inbound audio NOW (before TTS chunks arrive)
+        # Prevents echo from loudspeaker during Cartesia generation time
+        if hasattr(self.ws, '_suppress_inbound'):
+            self.ws._suppress_inbound = True
 
         try:
-            # Try WebSocket first, fall back to HTTP
+            # Try Cartesia WebSocket first, fall back to HTTP
             try:
                 await self._tts_websocket(text)
+                logger.info("TTS WS completed for: '%s'", text[:40])
             except Exception as e:
-                logger.warning("ElevenLabs WS failed, using HTTP: %s", e)
-                await self._tts_http(text)
+                logger.warning("Cartesia WS failed, using HTTP: %s", e)
+                try:
+                    await self._tts_http(text)
+                    logger.info("TTS HTTP completed for: '%s'", text[:40])
+                except Exception as e2:
+                    logger.error("TTS HTTP also failed: %s", e2)
         except Exception as e:
-            logger.error("TTS failed: %s", e)
+            logger.error("TTS failed completely: %s", e)
         finally:
             self._speaking.clear()
             # Reset silence timer AFTER agent finishes — gives user time to respond
             self._last_speech = time.time()
             await self._send_event("agent_talking", {"value": False})
+            # Tell TwilioAdapter to resume inbound audio (echo tail delay)
+            if hasattr(self.ws, 'mark_tts_done'):
+                self.ws.mark_tts_done()
 
     async def _tts_websocket(self, text: str):
         """Stream text to Cartesia WS and forward audio chunks to browser."""
@@ -1077,16 +1099,13 @@ Only one tag per response. Tag goes FIRST, before the text.
 
         async with websockets.connect(url) as cart_ws:
             # Send generation request
-            await cart_ws.send(json.dumps({
+            context_id = f"ctx-{self.call_id[:8]}-{self._turn_count}"
+            request_payload = {
                 "model_id": "sonic-3",
                 "transcript": text,
                 "voice": {
                     "mode": "id",
                     "id": voice_id,
-                    "__experimental_controls": {
-                        "speed": "normal",
-                        "emotion": emotion,
-                    },
                 },
                 "language": "en",
                 "context_id": context_id,
@@ -1095,30 +1114,47 @@ Only one tag per response. Tag goes FIRST, before the text.
                     "encoding": "pcm_s16le",
                     "sample_rate": 24000,
                 },
-                "continue": False,
-            }))
+            }
+            logger.debug("TTS request: voice_id=%s text='%s'", voice_id, text[:40])
+            await cart_ws.send(json.dumps(request_payload))
 
-            # Receive audio chunks — stream to browser immediately
+            # Receive audio chunks — stream to browser/phone immediately
             first_chunk = True
             tts_start = time.time()
+            chunk_count = 0
+            logger.info("TTS: waiting for Cartesia chunks (interrupt=%s shutdown=%s)",
+                        self._interrupt.is_set(), self._shutdown.is_set())
             async for msg in cart_ws:
                 if self._interrupt.is_set() or self._shutdown.is_set():
+                    logger.warning("TTS: interrupted (interrupt=%s shutdown=%s) after %d chunks",
+                                   self._interrupt.is_set(), self._shutdown.is_set(), chunk_count)
                     break
-                data = json.loads(msg)
-                if data.get("type") == "chunk" and data.get("data"):
+                try:
+                    data = json.loads(msg)
+                except json.JSONDecodeError:
+                    logger.warning("TTS: non-JSON message from Cartesia")
+                    continue
+                msg_type = data.get("type", "unknown")
+                if msg_type == "chunk" and data.get("data"):
+                    chunk_count += 1
                     if first_chunk:
                         logger.info("⚡ TTS first chunk: %dms", (time.time() - tts_start) * 1000)
                         first_chunk = False
                     audio_bytes = base64.b64decode(data["data"])
                     try:
                         await self.ws.send_bytes(audio_bytes)
-                    except Exception:
+                        logger.debug("TTS chunk %d: sent %d bytes", chunk_count, len(audio_bytes))
+                    except Exception as send_err:
+                        logger.error("Failed to send TTS chunk %d to WS: %s", chunk_count, send_err)
                         break
-                elif data.get("type") == "done" or data.get("done"):
+                elif msg_type == "done" or data.get("done"):
+                    logger.info("TTS: done after %d chunks", chunk_count)
                     break
-                elif data.get("type") == "error":
+                elif msg_type == "error":
                     logger.error("Cartesia error: %s", data.get("error", "unknown"))
                     raise Exception(f"Cartesia error: {data.get('error')}")
+                else:
+                    logger.debug("TTS: unknown msg type: %s", msg_type)
 
     async def _tts_http(self, text: str):
         """HTTP fallback TTS via Cartesia."""
@@ -1248,13 +1284,13 @@ Only one tag per response. Tag goes FIRST, before the text.
     # ─── Helpers ───────────────────────────────────────────────────
 
     async def _send_audio(self, audio_bytes: bytes):
-        """Send audio to browser. Only block on shutdown, never on interrupt."""
+        """Send audio to browser/phone. Only block on shutdown, never on interrupt."""
         if self._shutdown.is_set():
             return
         try:
             await self.ws.send_bytes(audio_bytes)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("_send_audio failed: %s", e)
 
     async def _send_event(self, event_type: str, data: dict):
         """Send a JSON event to the browser."""

@@ -333,18 +333,7 @@ export default function AgentPage() {
     setPhoneCallStatus("calling");
     setPhoneCallId(null);
     try {
-      // Wake up Render free tier from browser (no Vercel timeout limit)
-      toast.info("Waking up voice server...");
-      try {
-        await fetch("https://voice-agemt.onrender.com/health", {
-          signal: AbortSignal.timeout(60000),
-          mode: "cors",
-        });
-      } catch {
-        // Ignore — try the call anyway
-      }
-
-      const res = await fetch("/api/voice/call-phone", {
+      const res = await fetch("/api/agent/call-phone", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: trimmed, name: phoneName.trim() || "Quick Call" }),

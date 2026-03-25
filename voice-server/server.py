@@ -280,10 +280,10 @@ async def twilio_status(request: Request):
             # Post call summary to Vercel
             asyncio.create_task(_post_call_summary(
                 call_id=pipeline.call_id,
-                prospect_id=pipeline.prospect_id,
+                prospect_id=getattr(pipeline, 'prospect_id', ''),
                 duration=int(duration),
-                outcome=pipeline.get_outcome(),
-                transcript=pipeline.get_transcript(),
+                outcome=getattr(pipeline, 'get_outcome', lambda: 'unknown')(),
+                transcript=getattr(pipeline, 'get_transcript', lambda: '')(),
             ))
 
     return Response(status_code=200)
