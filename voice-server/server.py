@@ -39,8 +39,8 @@ http_session: Optional[aiohttp.ClientSession] = None
 
 
 # Late import to avoid circular — pipeline imports config directly
-from pipeline import VoicePipeline  # noqa: E402
 from web_pipeline import WebPipeline  # noqa: E402
+from twilio_adapter import TwilioAdapter  # noqa: E402
 
 
 # ─── Lifecycle ───────────────────────────────────────────────────────
@@ -359,18 +359,16 @@ async def websocket_voice(websocket: WebSocket, call_sid: str):
             await websocket.close(code=1013, reason="Server at capacity")
             return
 
-        pipeline = VoicePipeline(
+        # Use TwilioAdapter to bridge Twilio audio format to WebPipeline
+        adapter = TwilioAdapter(twilio_ws=websocket, call_sid=call_sid)
+        pipeline = WebPipeline(
+            ws=adapter,
             call_id=call_id,
-            call_sid=call_sid,
-            twilio_ws=websocket,
             http_session=http_session,
-            prospect_id=prospect_id,
-            prospect_name=prospect_name,
-            property_name=property_name,
         )
         active_pipelines[call_sid] = pipeline
 
-        logger.info("Pipeline started: call_id=%s call_sid=%s prospect=%s",
+        logger.info("Pipeline started (via adapter): call_id=%s call_sid=%s prospect=%s",
                      call_id, call_sid, _mask_phone(prospect_name))
 
         await pipeline.run()
