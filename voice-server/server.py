@@ -84,6 +84,7 @@ async def debug_config():
         "has_deepgram": bool(config.get("deepgram_api_key")),
         "has_groq": bool(config.get("groq_api_key")),
         "has_cartesia": bool(config.get("cartesia_api_key")),
+        "cartesia_voice_id": config.get("cartesia_voice_id", "NOT SET"),
         "llm_model": config.get("llm_model", "NOT SET"),
     }
 
