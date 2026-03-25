@@ -219,8 +219,8 @@ class WebPipeline:
         url = (
             "wss://api.deepgram.com/v1/listen?"
             "encoding=linear16&sample_rate=16000&channels=1"
-            "&model=nova-3&smart_format=true&endpointing=400"
-            "&interim_results=true&utterance_end_ms=1500"
+            "&model=nova-3&smart_format=true&endpointing=500"
+            "&interim_results=true&utterance_end_ms=2000"
         )
         self.dg_ws = await websockets.connect(
             url,
@@ -284,7 +284,9 @@ class WebPipeline:
                 # that are long enough to be real user speech (not echo)
                 # Echo from speakers is typically short fragments. Real interrupts are longer.
                 if self._speaking.is_set():
-                    if is_final and speech_final and len(transcript) > 25:
+                    # Time guard: no barge-in within 2s of agent starting to speak
+                    agent_speaking_for = now - getattr(self, '_agent_speak_start', now)
+                    if is_final and speech_final and len(transcript) > 35 and agent_speaking_for > 2.0:
                         # Check if this is echo (matches agent's last speech) or real user
                         is_echo = False
                         if self._last_agent_text:
@@ -329,7 +331,7 @@ class WebPipeline:
                         # Partial hasn't changed much — track stability
                         if self._partial_stable_time == 0:
                             self._partial_stable_time = now
-                        elif (now - self._partial_stable_time) > 0.3:
+                        elif (now - self._partial_stable_time) > 0.6:
                             # Stable for 300ms — start speculative generation
                             if (not self._speculative_task or self._speculative_task.done()):
                                 if self._text_similarity(transcript, self._speculative_transcript) < 0.9:
@@ -813,6 +815,15 @@ class WebPipeline:
         if self.key_facts:
             state_msg += f" | Facts: {', '.join(self.key_facts[-5:])}"
 
+        # Show last 3 agent responses so LLM can see its own patterns and vary
+        recent_starters = []
+        for msg in reversed(self.conversation):
+            if msg.get("role") == "assistant" and len(recent_starters) < 3:
+                first_word = msg["content"].split(",")[0].split()[0] if msg["content"].split() else ""
+                recent_starters.append(first_word)
+        if recent_starters:
+            state_msg += f" | Your last response starters: {', '.join(recent_starters)}. DO NOT start with the same word again. Vary your openers: Yeah, Look, Honestly, Right, Hmm, or start directly without a filler."
+
         # Full prompt every turn — Groq paid handles 40K+ tokens
         prompt = config["system_prompt"]
         # Inject critical runtime rules
@@ -891,7 +902,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — agent just talks, all actions done manually
             "temperature": 0.4,
-            "max_tokens": 200,
+            "max_tokens": 250,
             "stream": True,
         }
 
@@ -935,7 +946,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 200,
+            "max_tokens": 250,
         }
         async with self.http_session.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -959,7 +970,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 200,
+            "max_tokens": 250,
         }
         async with self.http_session.post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -982,7 +993,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 200,
+            "max_tokens": 250,
         }
         async with self.http_session.post(
             "https://api.openai.com/v1/chat/completions",
@@ -1000,6 +1011,7 @@ Only one tag per response. Tag goes FIRST, before the text.
         choice = data.get("choices", [{}])[0]
         content = (choice.get("message", {}).get("content") or "").strip()
 
+        # Truncate to max chars at sentence boundary
         if content and len(content) > MAX_RESPONSE_CHARS:
             for end in [". ", "! ", "? "]:
                 idx = content.rfind(end, 0, MAX_RESPONSE_CHARS)
@@ -1009,6 +1021,14 @@ Only one tag per response. Tag goes FIRST, before the text.
             else:
                 content = content[:MAX_RESPONSE_CHARS]
 
+        # Safety: if response was cut mid-word by max_tokens, trim to last sentence
+        if content and not content.rstrip().endswith(('.', '!', '?', '"')):
+            for end in ['. ', '! ', '? ']:
+                idx = content.rfind(end)
+                if idx > 20:  # keep at least 20 chars
+                    content = content[:idx + 1]
+                    break
+
         return content if content else None
 
     # ─── ElevenLabs TTS ────────────────────────────────────────────
@@ -1017,6 +1037,7 @@ Only one tag per response. Tag goes FIRST, before the text.
         """Generate TTS and send audio to browser."""
         self._interrupt.clear()
         self._speaking.set()
+        self._agent_speak_start = time.time()
         self._last_agent_text = text
         await self._send_event("agent_talking", {"value": True})
 
