@@ -361,6 +361,9 @@ async def websocket_voice(websocket: WebSocket, call_sid: str):
 
         # Use TwilioAdapter to bridge Twilio audio format to WebPipeline
         adapter = TwilioAdapter(twilio_ws=websocket, call_sid=call_sid)
+        # Start reading Twilio messages FIRST — captures "start" event with streamSid
+        await adapter.start_reading()
+
         pipeline = WebPipeline(
             ws=adapter,
             call_id=call_id,
