@@ -915,7 +915,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — agent just talks, all actions done manually
             "temperature": 0.4,
-            "max_tokens": 250,
+            "max_tokens": 100,
             "stream": True,
         }
 
@@ -959,7 +959,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 250,
+            "max_tokens": 100,
         }
         async with self.http_session.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -983,7 +983,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 250,
+            "max_tokens": 100,
         }
         async with self.http_session.post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -1006,7 +1006,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 250,
+            "max_tokens": 100,
         }
         async with self.http_session.post(
             "https://api.openai.com/v1/chat/completions",
