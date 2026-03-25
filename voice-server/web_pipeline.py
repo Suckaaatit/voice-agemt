@@ -833,8 +833,11 @@ class WebPipeline:
         if recent_starters:
             state_msg += f" | Your last response starters: {', '.join(recent_starters)}. DO NOT start with the same word again. Vary your openers: Yeah, Look, Honestly, Right, Hmm, or start directly without a filler."
 
-        # Full prompt every turn — Groq paid handles 40K+ tokens
-        prompt = config["system_prompt"]
+        # Two-layer prompt: full on first turn (learn tone), compact on Turn 2+ (speed)
+        if self._turn_count <= 1:
+            prompt = config["system_prompt"]  # Full reference with all 60 objections
+        else:
+            prompt = config.get("compact_prompt") or config["system_prompt"]  # Compact guidelines
         # Inject critical runtime rules
         prompt += """
 

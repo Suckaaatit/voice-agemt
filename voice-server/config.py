@@ -62,13 +62,16 @@ def _load_prompts() -> tuple[str, str]:
             full_prompt = text
             logger.info("Loaded full prompt (%d chars, ~%d tokens)", len(text), len(text) // 4)
 
-    # Load compact prompt
-    compact_path = Path(__file__).parent / "prompt_compact.txt"
-    if compact_path.exists():
-        text = compact_path.read_text(encoding="utf-8").strip()
-        if text:
-            compact_prompt = text
-            logger.info("Loaded compact prompt (%d chars)", len(text))
+    # Load compact prompt (check prompt_v2.txt first, then prompt_compact.txt)
+    for compact_name in ["prompt_v2.txt", "prompt_compact.txt"]:
+        compact_path = Path(__file__).parent / compact_name
+        if compact_path.exists():
+            text = compact_path.read_text(encoding="utf-8").strip()
+            if text:
+                compact_prompt = text
+                logger.info("Loaded compact prompt from %s (%d chars, ~%d tokens)",
+                           compact_name, len(text), len(text) // 4)
+                break
 
     # Fallbacks
     if not full_prompt:
