@@ -30,8 +30,8 @@ ALTER TABLE prospects ADD CONSTRAINT unique_prospect_phone UNIQUE (phone);
 
 -- ============================================================
 -- TABLE 2: calls
--- Every call placed, with Retell data attached via webhook.
--- retell_call_id stores the Retell call_id.
+-- Every call placed, with voice server data attached via webhook.
+-- retell_call_id stores the external call_id (legacy column name).
 -- ============================================================
 CREATE TABLE IF NOT EXISTS calls (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -118,7 +118,7 @@ CREATE TABLE IF NOT EXISTS phone_numbers (
 
 -- ============================================================
 -- TABLE 7: processed_tool_calls
--- Deduplication for Retell tool call retries.
+-- Deduplication for voice server tool call retries.
 -- tool_call_id is UNIQUE — duplicate inserts are silently ignored.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS processed_tool_calls (

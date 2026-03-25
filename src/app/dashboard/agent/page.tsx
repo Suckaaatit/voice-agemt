@@ -115,7 +115,7 @@ export default function AgentPage() {
 
     try {
       // 1. Get WebSocket URL from API
-      const res = await fetch("/api/retell/create-web-call", { method: "POST" });
+      const res = await fetch("/api/voice/create-web-call", { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Failed to create session");
 
@@ -377,7 +377,7 @@ export default function AgentPage() {
               <p className="text-xs text-[var(--text-muted)]">Status</p>
               <div className="mt-1 flex items-center gap-2 text-[#9dffcf]">
                 <span className="pulse-dot h-2.5 w-2.5 rounded-full bg-[var(--green)]" />
-                Custom Voice Server (No Retell)
+                Custom Voice Server
               </div>
             </div>
           </CardContent>

@@ -22,14 +22,11 @@ export const maxDuration = 60;
 export async function GET() {
   return withErrorHandling("dashboard settings get failed", async () => {
     return ok({
-      retell_agent_id_masked: maskValue(config.retell.agentId),
-      retell_from_number_masked: maskValue(config.retell.fromNumber),
       stripe_link_650_masked: maskValue(config.stripe.link650),
       stripe_link_1100_masked: maskValue(config.stripe.link1100),
       stripe_webhook_active: Boolean(config.stripe.webhookSecret),
       supabase_url_masked: maskUrl(config.supabase.url),
       integrations: {
-        retell: Boolean(config.retell.apiKey),
         stripe: Boolean(config.stripe.secretKey),
         resend: Boolean(config.resend.apiKey),
         supabase: Boolean(config.supabase.url && config.supabase.serviceRoleKey),

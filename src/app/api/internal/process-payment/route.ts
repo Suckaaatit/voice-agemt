@@ -10,7 +10,7 @@ export const maxDuration = 60;
 /**
  * POST /api/internal/process-payment
  *
- * Background worker called via self-call pattern from /api/retell/actions.
+ * Background worker called via self-call pattern from voice server actions.
  * Runs in its own serverless execution context (survives container freeze).
  *
  * Steps:

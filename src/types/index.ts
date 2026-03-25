@@ -4,10 +4,6 @@ import { z } from 'zod';
 // Environment Variable Schema
 // ============================================================
 export const EnvSchema = z.object({
-  RETELL_API_KEY: z.string().min(1, 'RETELL_API_KEY is required'),
-  RETELL_AGENT_ID: z.string().min(1, 'RETELL_AGENT_ID is required'),
-  NEXT_PUBLIC_RETELL_AGENT_ID: z.string().optional().or(z.literal('')),
-  RETELL_FROM_NUMBER: z.string().min(1, 'RETELL_FROM_NUMBER is required'),
   NEXT_PUBLIC_SUPABASE_URL: z.string().url('NEXT_PUBLIC_SUPABASE_URL must be a valid URL'),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1, 'SUPABASE_SERVICE_ROLE_KEY is required'),
   STRIPE_SECRET_KEY: z.string().startsWith('sk_', 'STRIPE_SECRET_KEY must start with sk_'),
@@ -31,59 +27,6 @@ export const EnvSchema = z.object({
 });
 
 export type EnvConfig = z.infer<typeof EnvSchema>;
-
-// ============================================================
-// Retell Webhook + Function Payload Schemas
-// ============================================================
-export const RetellTranscriptTurnSchema = z.object({
-  role: z.string(),
-  content: z.string(),
-  words: z.array(z.unknown()).optional(),
-}).passthrough();
-
-export const RetellCallAnalysisSchema = z.object({
-  call_summary: z.string().optional(),
-  user_sentiment: z.string().optional(),
-  call_successful: z.boolean().optional(),
-  custom_analysis_data: z.record(z.string(), z.unknown()).optional(),
-}).passthrough();
-
-export const RetellCallObjectSchema = z.object({
-  call_id: z.string().min(1, 'call_id is required'),
-  agent_id: z.string().optional(),
-  call_status: z.string().optional(),
-  metadata: z.record(z.string(), z.unknown()).optional(),
-  transcript: z.string().optional(),
-  transcript_object: z.array(RetellTranscriptTurnSchema).optional(),
-  recording_url: z.string().optional(),
-  call_analysis: RetellCallAnalysisSchema.optional(),
-  start_timestamp: z.number().optional(),
-  end_timestamp: z.number().optional(),
-  disconnection_reason: z.string().optional(),
-  call_type: z.string().optional(),
-  from_number: z.string().optional(),
-  to_number: z.string().optional(),
-}).passthrough();
-
-export type RetellCallObject = z.infer<typeof RetellCallObjectSchema>;
-
-export const RetellWebhookPayloadSchema = z.object({
-  event: z.enum(['call_started', 'call_ended', 'call_analyzed']),
-  call: RetellCallObjectSchema,
-}).passthrough();
-
-export type RetellWebhookPayload = z.infer<typeof RetellWebhookPayloadSchema>;
-
-export const RetellToolCallPayloadSchema = z.object({
-  call: z.object({
-    call_id: z.string().min(1, 'call.call_id is required'),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-  }).passthrough(),
-  args: z.record(z.string(), z.unknown()).default({}),
-  name: z.string().min(1, 'name is required'),
-}).passthrough();
-
-export type RetellToolCallPayload = z.infer<typeof RetellToolCallPayloadSchema>;
 
 // ============================================================
 // Internal Process Payment Payload

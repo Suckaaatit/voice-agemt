@@ -11,14 +11,11 @@ import { LoadingSkeleton } from "@/components/loading-skeleton";
 type SettingsPayload = {
   data:
     | {
-        retell_agent_id_masked: string;
-        retell_from_number_masked: string;
         stripe_link_650_masked: string;
         stripe_link_1100_masked: string;
         stripe_webhook_active: boolean;
         supabase_url_masked: string;
         integrations: {
-          retell: boolean;
           stripe: boolean;
           resend: boolean;
           supabase: boolean;
@@ -84,18 +81,6 @@ export default function SettingsPage() {
   useEffect(() => {
     void load();
   }, []);
-
-  const testRetell = async () => {
-    try {
-      const response = await fetch("/api/dashboard/settings", { cache: "no-store" });
-      const payload = (await response.json()) as SettingsPayload;
-      if (!response.ok || payload.error || !payload.data) throw new Error(payload.error || "Retell check failed.");
-      if (!payload.data.integrations.retell) throw new Error("Retell API key is not configured.");
-      toast.success("Retell configuration looks healthy.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Retell check failed.");
-    }
-  };
 
   const testStripeWebhook = async () => {
     try {
@@ -209,38 +194,6 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Retell Configuration</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            {loading ? (
-              loadingBlock
-            ) : (
-              <>
-                <div className="flex items-center justify-between rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.02)] px-3 py-2">
-                  <span className="text-[var(--text-muted)]">Agent ID</span>
-                  <span data-mono="true">{settings?.retell_agent_id_masked || "-"}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.02)] px-3 py-2">
-                  <span className="text-[var(--text-muted)]">From Number</span>
-                  <span data-mono="true">{settings?.retell_from_number_masked || "-"}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl border border-[var(--line)] bg-[rgba(255,255,255,0.02)] px-3 py-2">
-                  <span className="text-[var(--text-muted)]">Status</span>
-                  <span className="flex items-center gap-2">
-                    {statusDot(Boolean(settings?.integrations.retell))}
-                    {settings?.integrations.retell ? "Active" : "Inactive"}
-                  </span>
-                </div>
-              </>
-            )}
-            <Button onClick={testRetell} variant="outline">
-              Test Connection
-            </Button>
-          </CardContent>
-        </Card>
-
         <Card>
           <CardHeader>
             <CardTitle>Stripe Configuration</CardTitle>
@@ -390,9 +343,8 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>Integration Summary</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-1 gap-2 md:grid-cols-4">
+        <CardContent className="grid grid-cols-1 gap-2 md:grid-cols-3">
           {[
-            { label: "Retell", ok: settings?.integrations.retell || false },
             { label: "Stripe", ok: settings?.integrations.stripe || false },
             { label: "Resend", ok: settings?.integrations.resend || false },
             { label: "Supabase", ok: settings?.integrations.supabase || false },

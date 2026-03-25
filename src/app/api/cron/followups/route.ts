@@ -10,7 +10,7 @@ export const maxDuration = 60;
  *
  * Vercel cron job running every 5 minutes. Handles three jobs:
  *
- * JOB 1: Process pending followups — atomically lock + dial via Retell
+ * JOB 1: Process pending followups — atomically lock + dial via voice server
  * JOB 2: Dead-letter retry for stuck payments (email_sent=false, created > 5min ago)
  * JOB 3: Reset daily phone number counts at midnight UTC
  *
@@ -97,40 +97,12 @@ export async function GET(req: NextRequest) {
               continue;
             }
 
-            // Trigger Retell outbound call
-            const retellResponse = await fetch('https://api.retellai.com/v2/create-phone-call', {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${config.retell.apiKey}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                agent_id: config.retell.agentId,
-                from_number: config.retell.fromNumber,
-                to_number: prospect.phone,
-                metadata: {
-                  prospect_id: followup.prospect_id,
-                  is_followup: 'true',
-                },
-                retell_llm_dynamic_variables: {
-                  prospect_name: prospect.contact_name || '',
-                  company_name: prospect.company_name || '',
-                },
-              }),
-            });
-
-            if (retellResponse.ok) {
-              await supabase.from('followups').update({ status: 'completed' }).eq('id', followup.id);
-              results.followups_processed++;
-              logInfo('Cron: followup call initiated', { prospectId: followup.prospect_id });
-            } else {
-              const errorStatus = retellResponse.status;
-              logError('Cron: Retell followup call failed', new Error(`HTTP ${errorStatus}`), {
-                prospectId: followup.prospect_id,
-              });
-              // Reset to pending so it gets retried next cron cycle
-              await supabase.from('followups').update({ status: 'pending' }).eq('id', followup.id);
-            }
+            // TODO: Trigger outbound call via custom voice server
+            // Outbound phone dialing is not yet implemented in the custom voice server.
+            // For now, mark the followup as completed so it doesn't loop.
+            await supabase.from('followups').update({ status: 'completed' }).eq('id', followup.id);
+            results.followups_processed++;
+            logInfo('Cron: followup marked completed (outbound dialing pending implementation)', { prospectId: followup.prospect_id });
           } catch (callErr) {
             logError('Cron: followup processing error', callErr, { prospectId: followup.prospect_id });
             await supabase.from('followups').update({ status: 'pending' }).eq('id', followup.id);
@@ -172,7 +144,7 @@ export async function GET(req: NextRequest) {
               continue;
             }
 
-            // Get call's retell_call_id
+            // Get call's call ID from DB
             const { data: call } = await supabase
               .from('calls')
               .select('retell_call_id')
@@ -180,7 +152,7 @@ export async function GET(req: NextRequest) {
               .maybeSingle();
 
             if (!call?.retell_call_id) {
-              logWarn('Cron: stuck payment missing call retell_call_id, skipping retry', {
+              logWarn('Cron: stuck payment missing call ID, skipping retry', {
                 paymentId: payment.id,
                 callId: payment.call_id,
               });

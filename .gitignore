@@ -41,3 +41,5 @@ voice-server/.env
 voice-server/__pycache__
 voice-server/*.pyc
 voice-server/prewarmed_audio/
+
+.vercel

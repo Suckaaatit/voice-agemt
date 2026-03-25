@@ -8,9 +8,9 @@ Production-ready AI agent that calls prospects, delivers a structured sales pitc
 
 ## 1. ARCHITECTURE OVERVIEW
 
-The system uses Retell AI as voice orchestrator (Deepgram STT → Groq Llama 3.1 70B → Cartesia TTS) achieving ~170ms end-to-end latency. Next.js API routes on Vercel handle all webhooks and tool calls. Every tool call returns an immediate response to Retell (<500ms) while heavy work (Stripe sessions, email sending) fires via self-call endpoints to separate serverless execution contexts. The dead-letter cron catches any failed background tasks every 5 minutes. Upserts and atomic row locking handle every race condition, retry, and out-of-order webhook.
+The system uses a custom voice server (Deepgram STT, Groq Llama 3.3 70B, ElevenLabs TTS) achieving low-latency voice conversations. Next.js API routes on Vercel handle all webhooks and tool calls. Heavy work (Stripe sessions, email sending) fires via self-call endpoints to separate serverless execution contexts. The dead-letter cron catches any failed background tasks every 5 minutes. Upserts and atomic row locking handle every race condition, retry, and out-of-order webhook.
 
-**Stack:** Next.js App Router → Vercel Pro | Supabase Postgres | Stripe Checkout Sessions | Resend Email | Retell AI Voice | Zod Validation
+**Stack:** Next.js App Router, Vercel Pro | Supabase Postgres | Stripe Checkout Sessions | Resend Email | Custom Voice Server (Deepgram + Groq + ElevenLabs) | Zod Validation
 
 ---
 
@@ -25,9 +25,7 @@ ai-voice-sales/
 │   │   ├── payment-success/page.tsx
 │   │   ├── payment-cancelled/page.tsx
 │   │   └── api/
-│   │       ├── retell/
-│   │       │   ├── webhook/route.ts         ← Call lifecycle (start/end/analyzed)
-│   │       │   ├── actions/route.ts         ← Mid-call tool calls (CRITICAL)
+│   │       ├── voice/
 │   │       │   └── create-web-call/route.ts ← Browser call widget
 │   │       ├── stripe/
 │   │       │   └── webhook/route.ts         ← Payment confirmation
@@ -116,19 +114,12 @@ vercel link
 vercel --prod
 
 # 6. After deploy, configure external services with your Vercel URL:
-#    Retell: Webhook URL = https://your-app.vercel.app/api/retell/webhook
-#            Custom Tool Server URL = https://your-app.vercel.app/api/retell/actions
 #    Stripe: Webhook URL = https://your-app.vercel.app/api/stripe/webhook
 #    Resend: Webhook URL = https://your-app.vercel.app/api/resend/webhook
 
 # 7. Local Stripe testing (before deploy)
 stripe listen --forward-to localhost:3000/api/stripe/webhook
 # Copy the webhook signing secret to .env.local
-
-# 8. Configure Retell agent (run once after deploy)
-#    In Retell Dashboard → Agent → Settings:
-#    - Set Webhook URL to https://your-app.vercel.app/api/retell/webhook
-#    - Set Custom Tool Server URL to https://your-app.vercel.app/api/retell/actions
 ```
 
 ---
@@ -136,16 +127,6 @@ stripe listen --forward-to localhost:3000/api/stripe/webhook
 ## 7. VERIFICATION COMMANDS
 
 ```bash
-# Test Retell webhook (simulate end-of-call)
-curl -s -X POST https://your-app.vercel.app/api/retell/webhook \
-  -H "Content-Type: application/json" \
-  -d '{"event":"call_ended","call":{"call_id":"test-call-123","agent_id":"your_agent_id","call_status":"ended"}}' | jq .
-
-# Test Retell actions (simulate tool call)
-curl -s -X POST https://your-app.vercel.app/api/retell/actions \
-  -H "Content-Type: application/json" \
-  -d '{"call":{"call_id":"test-call-123","metadata":{"prospect_id":"00000000-0000-0000-0000-000000000000"}},"name":"confirm_payment","args":{}}' | jq .
-
 # Test cron endpoint
 curl -s https://your-app.vercel.app/api/cron/followups | jq .
 
@@ -161,7 +142,7 @@ node scripts/batch-dial.js 3
 
 ## 8. NEXT 3 PROBLEMS + SOLUTIONS
 
-### Problem 1: Retell tool call times out (dead air)
+### Problem 1: Voice server tool call times out (dead air)
 - **Symptom:** Caller hears silence for 5+ seconds after agreeing to pay
 - **Root cause:** Background task blocking the tool call response
 - **Immediate mitigation:** All tool calls return instantly; heavy work fires via self-call. This is already implemented.
@@ -203,16 +184,15 @@ node scripts/batch-dial.js 50
 ## 10. LAUNCH READINESS CHECKLIST
 
 - [ ] ✅ `vercel --prod` = deployed and live
-- [ ] ✅ `curl /api/retell/webhook` = returns `{"ok":true}`
 - [ ] ✅ `curl /api/cron/followups` = returns `{"ok":true,"results":{...}}`
 - [ ] ✅ Stripe test payment = webhook fires, payment record created
 - [ ] ✅ Stripe webhook secret configured in Vercel env vars
 - [ ] ✅ Resend domain verified (SPF/DKIM/DMARC green)
-- [ ] ✅ Retell agent configured with webhook URL + custom tool server URL
+- [ ] ✅ Voice server deployed and accessible
 - [ ] ✅ Phone numbers inserted into `phone_numbers` table
 - [ ] ✅ Error tracking = Vercel logs dashboard active
-- [ ] ✅ All webhook endpoints responding (Retell, Stripe, Resend)
-- [ ] ✅ Test call from Retell dashboard → your personal phone → data in Supabase
+- [ ] ✅ All webhook endpoints responding (Stripe, Resend)
+- [ ] ✅ Test browser call from Agent page, data in Supabase
 
 ---
 

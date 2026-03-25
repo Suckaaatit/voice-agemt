@@ -38,11 +38,6 @@ function loadConfig() {
   };
 
   return {
-    retell: {
-      apiKey: clean(result.data.RETELL_API_KEY),
-      agentId: clean(result.data.RETELL_AGENT_ID),
-      fromNumber: clean(result.data.RETELL_FROM_NUMBER),
-    },
     supabase: {
       url: result.data.NEXT_PUBLIC_SUPABASE_URL.trim(),
       serviceRoleKey: clean(result.data.SUPABASE_SERVICE_ROLE_KEY),

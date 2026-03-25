@@ -44,42 +44,39 @@ export async function POST(req: NextRequest) {
     }
 
     const contactName = payload.contact_name || lockedProspect.contact_name || null;
-    const response = await fetch("https://api.retellai.com/v2/create-phone-call", {
+    // Call our custom voice server
+    const voiceServerUrl = process.env.VOICE_SERVER_URL || "https://voice-agemt.onrender.com";
+    const agentSecret = process.env.AGENT_SECRET || "";
+    const response = await fetch(`${voiceServerUrl}/api/calls/initiate`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.retell.apiKey}`,
+        "x-agent-secret": agentSecret,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        agent_id: config.retell.agentId,
-        from_number: config.retell.fromNumber,
-        to_number: phoneNumber,
-        metadata: {
-          prospect_id: payload.prospect_id,
-          phone: phoneNumber,
-        },
-        retell_llm_dynamic_variables: {
-          prospect_name: contactName || "",
-          company_name: lockedProspect.company_name || "",
-        },
+        to: phoneNumber,
+        prospect_id: payload.prospect_id,
+        prospect_name: contactName || "",
+        property_name: lockedProspect.company_name || "",
       }),
     });
 
     if (!response.ok) {
+      const errBody = await response.text();
       await supabase
         .from("prospects")
         .update({ status: "pending", updated_at: new Date().toISOString() })
         .eq("id", payload.prospect_id);
-      return fail(`Retell call failed (${response.status})`, 502);
+      return fail(`Voice server call failed (${response.status}): ${errBody}`, 502);
     }
 
-    const callPayload = (await response.json()) as { call_id?: string };
+    const callPayload = (await response.json()) as { call_id?: string; success?: boolean };
     if (!callPayload.call_id) {
       await supabase
         .from("prospects")
         .update({ status: "pending", updated_at: new Date().toISOString() })
         .eq("id", payload.prospect_id);
-      return fail("Retell response missing call ID.", 502);
+      return fail("Voice server response missing call ID.", 502);
     }
 
     const [prospectUpdateRes, callUpsertRes] = await Promise.all([

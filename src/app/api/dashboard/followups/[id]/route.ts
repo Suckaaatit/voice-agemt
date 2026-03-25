@@ -1,7 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
-import { config } from "@/lib/config";
 import { parseJson, withErrorHandling, ok, fail, requireSupabaseConfigured } from "@/app/api/dashboard/_utils";
 
 const ParamsSchema = z.object({ id: z.string().uuid() });
@@ -50,34 +49,10 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       const prospect = Array.isArray(followup.prospects) ? followup.prospects[0] : followup.prospects;
       if (!prospect?.phone) return fail("Prospect phone number is missing.", 400);
 
-      const response = await fetch("https://api.retellai.com/v2/create-phone-call", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.retell.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          agent_id: config.retell.agentId,
-          from_number: config.retell.fromNumber,
-          to_number: prospect.phone,
-          metadata: {
-            prospect_id: followup.prospect_id,
-            is_followup: "true",
-          },
-          retell_llm_dynamic_variables: {
-            prospect_name: prospect.contact_name || "",
-            company_name: prospect.company_name || "",
-          },
-        }),
-      });
-
-      if (!response.ok) {
-        return fail(`Retell call failed with status ${response.status}`, 502);
-      }
-
+      // TODO: Outbound phone dialing not yet implemented in custom voice server
+      // For now, mark the followup as completed
       await supabase.from("followups").update({ status: "completed" }).eq("id", id);
-      const callPayload = await response.json();
-      return ok({ followup_id: id, call: callPayload }, 1);
+      return ok({ followup_id: id, message: "Followup marked completed (outbound dialing pending implementation)" }, 1);
     }
 
     const updatePayload: Record<string, unknown> = {};

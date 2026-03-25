@@ -19,7 +19,7 @@
  *
  * Required env vars (set in shell or .env.local):
  *   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
- *   RETELL_API_KEY, RETELL_AGENT_ID, RETELL_FROM_NUMBER
+ *   VOICE_SERVER_URL (defaults to https://voice-agemt.onrender.com)
  */
 
 const { createClient } = require('@supabase/supabase-js');
@@ -29,9 +29,8 @@ const { createClient } = require('@supabase/supabase-js');
 // ============================================================
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const RETELL_API_KEY = process.env.RETELL_API_KEY;
-const RETELL_AGENT_ID = process.env.RETELL_AGENT_ID;
-const RETELL_FROM_NUMBER = process.env.RETELL_FROM_NUMBER;
+const VOICE_SERVER_URL = process.env.VOICE_SERVER_URL || 'https://voice-agemt.onrender.com';
+const AGENT_SECRET = process.env.AGENT_SECRET || '';
 const DELAY_MS = 2000;
 const MAX_CALLS_PER_RUN = parseInt(process.argv[2]) || 100;
 let interrupted = false;
@@ -42,7 +41,7 @@ process.on('SIGINT', () => {
 });
 
 // Validate required env vars
-const required = { SUPABASE_URL, SUPABASE_KEY, RETELL_API_KEY, RETELL_AGENT_ID, RETELL_FROM_NUMBER };
+const required = { SUPABASE_URL, SUPABASE_KEY };
 const missing = Object.entries(required).filter(([, v]) => !v).map(([k]) => k);
 if (missing.length > 0) {
   console.error(`\n❌ Missing required environment variables:\n  ${missing.join('\n  ')}\n`);
@@ -224,41 +223,34 @@ async function main() {
       break;
     }
 
-    // ---- Make the call via Retell API ----
+    // ---- Make the call via voice server API ----
     try {
       const displayName = prospect.contact_name || prospect.phone;
       console.log(`📞 [${dialed + 1}/${MAX_CALLS_PER_RUN}] Calling ${displayName}...`);
 
-      const response = await fetch('https://api.retellai.com/v2/create-phone-call', {
+      const response = await fetch(`${VOICE_SERVER_URL}/api/calls/initiate`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${RETELL_API_KEY}`,
           'Content-Type': 'application/json',
+          ...(AGENT_SECRET ? { 'x-agent-secret': AGENT_SECRET } : {}),
         },
         body: JSON.stringify({
-          agent_id: RETELL_AGENT_ID,
-          from_number: phoneNumber.number || RETELL_FROM_NUMBER,
+          from_number: phoneNumber.number,
           to_number: prospect.phone,
-          metadata: {
-            prospect_id: prospect.id,
-            phone: prospect.phone,
-            company: prospect.company_name || '',
-          },
-          retell_llm_dynamic_variables: {
-            prospect_name: prospect.contact_name || '',
-            company_name: prospect.company_name || '',
-          },
+          prospect_id: prospect.id,
+          prospect_name: prospect.contact_name || '',
+          company_name: prospect.company_name || '',
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Retell API ${response.status}: ${errorText.substring(0, 200)}`);
+        throw new Error(`Voice server ${response.status}: ${errorText.substring(0, 200)}`);
       }
 
       const callData = await response.json();
       if (!callData.call_id) {
-        throw new Error('Retell response missing call_id');
+        throw new Error('Voice server response missing call_id');
       }
 
       // Mark prospect as called
