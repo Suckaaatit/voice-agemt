@@ -268,7 +268,8 @@ class VoicePipeline:
         """Main pipeline loop — process Twilio WebSocket messages."""
         # Connect to external services
         await self._connect_deepgram()
-        await self._connect_elevenlabs()
+        # ElevenLabs disabled — Cartesia is primary TTS (HTTP, no persistent connection needed)
+        self.el_ws = None
         await self._start_redis_listener()
 
         # Start background tasks
@@ -1035,14 +1036,7 @@ class VoicePipeline:
         try:
             await self._tts_cartesia(text)
         except Exception as e:
-            logger.error("Cartesia TTS error: %s — trying ElevenLabs fallback", e)
-            try:
-                if self.el_ws:
-                    await self._tts_websocket(text)
-                else:
-                    await self._tts_http(text)
-            except Exception as e2:
-                logger.error("All TTS failed: %s", e2)
+            logger.error("Cartesia TTS failed: %s", e)
         finally:
             filler_task.cancel()
             self._is_speaking = False
@@ -1075,7 +1069,7 @@ class VoicePipeline:
                     },
                     headers={
                         "X-API-Key": api_key,
-                        "Cartesia-Version": "2024-06-10",
+                        "Cartesia-Version": "2025-04-16",
                         "Content-Type": "application/json",
                     },
                     timeout=aiohttp.ClientTimeout(total=10),
