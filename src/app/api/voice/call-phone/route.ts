@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export const maxDuration = 15;
+export const maxDuration = 60;
 
 /**
  * POST /api/voice/call-phone
  * Quick-dial: call a phone number without creating a prospect.
+ * Pings voice server health first to wake Render free tier if sleeping.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -20,6 +21,15 @@ export async function POST(req: NextRequest) {
     const voiceServerUrl =
       process.env.VOICE_SERVER_URL || "https://voice-agemt.onrender.com";
     const agentSecret = process.env.AGENT_SECRET || "";
+
+    // Wake up Render if sleeping (free tier cold start ~50s)
+    try {
+      await fetch(`${voiceServerUrl}/health`, {
+        signal: AbortSignal.timeout(55000),
+      });
+    } catch {
+      // Health check failed — try the call anyway
+    }
 
     const response = await fetch(`${voiceServerUrl}/api/calls/initiate`, {
       method: "POST",
