@@ -379,19 +379,29 @@ class WebPipeline:
                     if self._pending_task and not self._pending_task.done():
                         self._pending_task.cancel()
 
-                    word_count = len(self._pending_transcript.split())
-                    if word_count <= 3:
-                        # Short response ("okay", "hi", "yeah") — respond quickly
-                        await asyncio.sleep(0.3)  # Brief pause to catch any continuation
-                        if self._pending_transcript:
-                            text = self._pending_transcript
-                            self._pending_transcript = ""
-                            await self._send_event("transcript", {"role": "user", "text": text})
-                            await self._handle_user_input(text)
-                    else:
-                        # Longer utterance — wait 1.2s for potential continuation
+                    # Determine wait time based on content
+                    pending = self._pending_transcript
+                    word_count = len(pending.split())
+                    last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
+                    ends_with_comma = pending.rstrip().endswith(",")
+
+                    # Continuation words = user is mid-thought
+                    CONTINUATION_WORDS = {"like", "and", "but", "so", "or", "because", "basically", "actually", "honestly", "well", "um", "uh", "the", "a", "my", "our", "this", "that", "it's", "its", "we", "i", "they"}
+
+                    if word_count <= 3 and last_word not in CONTINUATION_WORDS:
+                        # Short complete response ("okay", "hi", "yeah", "no") — respond after brief wait
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript()
+                            self._process_pending_transcript(delay=0.6)
+                        )
+                    elif ends_with_comma or last_word in CONTINUATION_WORDS:
+                        # Mid-sentence — wait longer for them to finish
+                        self._pending_task = asyncio.create_task(
+                            self._process_pending_transcript(delay=2.0)
+                        )
+                    else:
+                        # Longer complete utterance — wait 1.2s for potential continuation
+                        self._pending_task = asyncio.create_task(
+                            self._process_pending_transcript(delay=1.2)
                         )
                 elif is_final:
                     self._last_speech = time.time()
@@ -441,13 +451,14 @@ class WebPipeline:
         except Exception as e:
             logger.debug("Speculative LLM failed (expected): %s", e)
 
-    async def _process_pending_transcript(self):
-        """Wait 1.2s then process accumulated transcript. Allows catching split sentences."""
-        await asyncio.sleep(1.2)
-        if self._pending_transcript:
+    async def _process_pending_transcript(self, delay: float = 1.2):
+        """Wait then process accumulated transcript. Delay varies by utterance type."""
+        await asyncio.sleep(delay)
+        if self._pending_transcript and not self._shutdown.is_set():
             text = self._pending_transcript
             self._pending_transcript = ""
             self._pending_task = None
+            logger.info("Processing accumulated transcript (delay=%.1fs): '%s'", delay, text[:60])
             await self._send_event("transcript", {"role": "user", "text": text})
             await self._handle_user_input(text)
 
