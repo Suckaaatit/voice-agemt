@@ -93,13 +93,13 @@ These mean they are busy or unsure. Goal: gently guide them to consider the key 
 -> Later usually means under pressure. The only thing to decide now is whether this is handled in advance or during the incident.
 
 3. "Now is not a good time."
--> Understood. This takes about 20 seconds to clarify. If something happened tonight, could a crew be dispatched immediately, or would someone need to approve it first?
+-> Understood. This takes about 20 seconds. When pressure hits, is response already locked in, or would someone need to scramble?
 
 4. "Can you call me back another day?"
 -> I can. Before I do, I need to know whether this is something you already have structured, or something you would only address after an incident.
 
 5. "I am in the middle of something."
--> That is fine. This is one question. If something happened tonight, would response already be authorized?
+-> That is fine. One quick question — is response pre-authorized, or would it need sign-off during the incident?
 
 6. "Just send the details and we will review internally."
 -> Internal review only works if ownership is clear. Who currently owns authorization for this?
@@ -111,25 +111,25 @@ CATEGORY 2: AUTHORITY AND OWNERSHIP
 Goal: understand who makes the decision so you can help them. Be respectful of their process.
 
 8. "I am not the decision maker."
--> That is fine. I just need to understand the structure. If something happened tonight, could response be dispatched immediately, or would approval still be needed? Who owns that call?
+-> That is fine. I just need to understand the structure. When an incident occurs, who authorizes the response? Is that already defined?
 
 9. "This goes through head office."
--> Understood. At the site level, timing still matters. If something happened tonight, could response be dispatched immediately, or would it have to wait for head office approval?
+-> Understood. At the site level, timing still matters. During a real incident, can the property act immediately or does it wait for head office?
 
 10. "Procurement handles this."
--> Procurement usually comes in after the operating decision is clear. Right now, I am just clarifying readiness. If something happened tonight, could response be dispatched immediately?
+-> Procurement usually comes in after the operating decision is clear. Right now, I am just clarifying readiness. Is response pre-authorized or not?
 
 11. "Our corporate office decides vendors."
--> That makes sense. Corporate standardizes vendors once readiness is defined. At the property level, if something happened tonight, could response be dispatched immediately?
+-> That makes sense. Corporate standardizes vendors once readiness is defined. At the property level, is there an immediate response plan?
 
 12. "I need approval from management."
--> That is common. Management usually wants clarity on one thing first. If something happened tonight, could response be dispatched immediately, or would approval still be needed while the situation is active?
+-> That is common. Management usually wants clarity on one thing. Is the response plan already structured, or is it still being figured out?
 
 13. "Legal would have to review this."
--> Legal review is normal after the fact. The operational question comes first. If something happened tonight, could response be dispatched immediately?
+-> Legal review is normal after the fact. The operational question comes first. Is response pre-authorized or reactive?
 
 14. "This is not under my scope."
--> Understood. Then my job is to locate the right owner. If something happened tonight, who would be responsible for approving response immediately?
+-> Understood. Then my job is to locate the right owner. Who would be responsible for authorizing response during an actual incident?
 
 CATEGORY 3: STATUS QUO AND COMPLACENCY
 
@@ -155,7 +155,7 @@ CATEGORY 3: STATUS QUO AND COMPLACENCY
 CATEGORY 4: COST AND VALUE
 
 21. "We do not have budget for this."
--> That makes sense. This is not really a budget issue. It is about control. If something happened tonight, could response be dispatched immediately?
+-> That makes sense. This is not really a budget issue. It is about control. When pressure hits, is the response already locked in?
 
 22. "This is not a priority expense."
 -> Agreed. It usually is not until something happens. At that point, cost and timing are no longer controlled.

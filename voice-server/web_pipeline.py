@@ -376,11 +376,6 @@ class WebPipeline:
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
 
-                    # Always cancel previous pending task — we'll restart with fresh timing
-                    if self._pending_task and not self._pending_task.done():
-                        self._pending_task.cancel()
-                        self._pending_task = None
-
                     # Analyze the FULL accumulated transcript
                     pending = self._pending_transcript
                     total_words = len(pending.split())
@@ -389,12 +384,20 @@ class WebPipeline:
 
                     # Continuation indicators = user is mid-thought
                     CONTINUATION_WORDS = {"like", "and", "but", "so", "or", "because", "basically", "actually", "honestly", "well", "um", "uh", "the", "a", "my", "our", "this", "that", "it's", "its", "we", "i", "they", "see", "now", "right"}
+                    is_continuation = ends_with_comma or last_word in CONTINUATION_WORDS
 
-                    if ends_with_comma or last_word in CONTINUATION_WORDS:
-                        # Mid-sentence — wait for them to finish
+                    if is_continuation:
+                        # User still mid-sentence — cancel old timer, start longer wait
+                        if self._pending_task and not self._pending_task.done():
+                            self._pending_task.cancel()
                         self._pending_task = asyncio.create_task(
                             self._process_pending_transcript(delay=2.5)
                         )
+                    elif self._pending_task and not self._pending_task.done():
+                        # Task already running — DON'T cancel it
+                        # New text is accumulated in _pending_transcript
+                        # The existing timer will fire and process everything
+                        pass
                     elif total_words <= 2:
                         # Very short ("Yeah.", "Okay.", "No.") — respond fast
                         self._pending_task = asyncio.create_task(
@@ -477,13 +480,15 @@ class WebPipeline:
         if not text_lower:
             return
 
-        # ── Backchannel detection — "uh huh", "yeah", "okay" aren't turns ──
+        # ── Backchannel detection — only ignore if agent is CURRENTLY speaking ──
         word_count = len(text_lower.split())
         if word_count <= 3 and text_lower.rstrip(".,!?") in BACKCHANNELS:
-            logger.info("Backchannel detected, ignoring: '%s'", text_lower)
-            # Don't trigger LLM, don't add to conversation
-            # Just let the agent continue or wait
-            return
+            if self._speaking.is_set():
+                # Agent is mid-sentence — this is a true backchannel, ignore
+                logger.info("Backchannel (agent speaking): '%s'", text_lower)
+                return
+            # Agent finished speaking — "Yeah" is a real answer, process it
+            logger.info("Short response (not backchannel): '%s'", text_lower)
 
         # Recovery nudge — if LLM asked "shall I send?" and user confirms
         if self._pending_tool_nudge:
@@ -570,7 +575,7 @@ class WebPipeline:
             ])
             if has_reframe:
                 self._reframe_count += 1
-                if self._reframe_count > 3:
+                if self._reframe_count > 2:
                     # Strip the reframe phrase from the response
                     import re as _re
                     response = _re.sub(
