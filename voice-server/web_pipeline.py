@@ -617,10 +617,26 @@ class WebPipeline:
         for starter in BANNED_STARTERS:
             if text.startswith(starter):
                 text = text[len(starter):].lstrip()
-                # Capitalize first letter
                 if text:
                     text = text[0].upper() + text[1:]
                 break
+
+        # Enforce "So" variety — track consecutive "So" starts, replace if overused
+        if not hasattr(self, '_so_count'):
+            self._so_count = 0
+        if text.lower().startswith("so,") or text.lower().startswith("so "):
+            self._so_count += 1
+            if self._so_count > 1:  # Allow max 1 consecutive "So" start
+                REPLACEMENTS = ["Yeah,", "Right,", "Honestly,", "Well,", "Hmm,", ""]
+                import random
+                replacement = random.choice(REPLACEMENTS)
+                text = text[2:].lstrip().lstrip(",").lstrip()
+                if replacement:
+                    text = replacement + " " + text[0].lower() + text[1:] if text else replacement
+                else:
+                    text = text[0].upper() + text[1:] if text else text
+        else:
+            self._so_count = 0  # Reset when a different starter is used
 
         # Dedup — only block CONSECUTIVE identical responses
         if self._last_3_responses and text.lower().strip() == self._last_3_responses[-1].lower().strip():
