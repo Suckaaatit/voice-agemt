@@ -376,37 +376,34 @@ class WebPipeline:
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
 
-                    # Determine wait time based on NEW transcript content
-                    new_words = transcript.split()
-                    new_word_count = len(new_words)
-                    last_word = transcript.rstrip(".,!?").split()[-1].lower() if transcript.strip() else ""
-                    ends_with_comma = transcript.rstrip().endswith(",")
+                    # Always cancel previous pending task — we'll restart with fresh timing
+                    if self._pending_task and not self._pending_task.done():
+                        self._pending_task.cancel()
+                        self._pending_task = None
 
-                    # Continuation words = user is mid-thought
-                    CONTINUATION_WORDS = {"like", "and", "but", "so", "or", "because", "basically", "actually", "honestly", "well", "um", "uh", "the", "a", "my", "our", "this", "that", "it's", "its", "we", "i", "they"}
+                    # Analyze the FULL accumulated transcript
+                    pending = self._pending_transcript
+                    total_words = len(pending.split())
+                    last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
+                    ends_with_comma = pending.rstrip().endswith(",")
 
-                    is_continuation = ends_with_comma or last_word in CONTINUATION_WORDS
+                    # Continuation indicators = user is mid-thought
+                    CONTINUATION_WORDS = {"like", "and", "but", "so", "or", "because", "basically", "actually", "honestly", "well", "um", "uh", "the", "a", "my", "our", "this", "that", "it's", "its", "we", "i", "they", "see", "now", "right"}
 
-                    # Only cancel previous task if this is a continuation (user still talking)
-                    if is_continuation:
-                        if self._pending_task and not self._pending_task.done():
-                            self._pending_task.cancel()
+                    if ends_with_comma or last_word in CONTINUATION_WORDS:
+                        # Mid-sentence — wait for them to finish
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=2.0)
+                            self._process_pending_transcript(delay=2.5)
                         )
-                    elif self._pending_task and not self._pending_task.done():
-                        # Task already running — let it fire with accumulated text
-                        # New text is already in _pending_transcript
-                        pass
-                    elif new_word_count <= 3:
-                        # Short complete response ("okay", "hi", "yeah") — respond quickly
+                    elif total_words <= 3:
+                        # Short response — wait a bit for them to add more
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=0.6)
+                            self._process_pending_transcript(delay=1.0)
                         )
                     else:
-                        # Longer complete utterance — wait for potential continuation
+                        # Complete longer utterance — process after brief pause
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=1.2)
+                            self._process_pending_transcript(delay=1.0)
                         )
                 elif is_final:
                     self._last_speech = time.time()
