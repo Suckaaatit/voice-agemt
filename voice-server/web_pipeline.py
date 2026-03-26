@@ -127,6 +127,10 @@ class WebPipeline:
         self._user_speaking_since: float = 0.0
         self._backchannel_played: bool = False
 
+        # Transcript accumulation — prevents splitting "okay, how did you get my number?" into two
+        self._pending_transcript: str = ""
+        self._pending_task: Optional[asyncio.Task] = None
+
         # Per-component latency tracking
         self._latency: dict = {"stt": [], "llm": [], "tts": [], "total": []}
 
@@ -361,14 +365,34 @@ class WebPipeline:
 
                     self.is_first_response = False
                     self._last_speech = time.time()
-                    self._stt_done_time = time.time()  # latency tracking
-                    # Reset backchannel + utterance timeout tracking
+                    self._stt_done_time = time.time()
+
+                    # Accumulate transcripts — prevents splitting long sentences
+                    # "okay, how did you get my number?" might come as two speech_finals
+                    self._pending_transcript = (self._pending_transcript + " " + transcript).strip()
                     self._user_speaking_since = 0.0
                     self._backchannel_played = False
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
-                    await self._send_event("transcript", {"role": "user", "text": transcript})
-                    await self._handle_user_input(transcript)
+
+                    # Cancel previous pending task if still waiting
+                    if self._pending_task and not self._pending_task.done():
+                        self._pending_task.cancel()
+
+                    word_count = len(self._pending_transcript.split())
+                    if word_count <= 3:
+                        # Short response ("okay", "hi", "yeah") — respond quickly
+                        await asyncio.sleep(0.3)  # Brief pause to catch any continuation
+                        if self._pending_transcript:
+                            text = self._pending_transcript
+                            self._pending_transcript = ""
+                            await self._send_event("transcript", {"role": "user", "text": text})
+                            await self._handle_user_input(text)
+                    else:
+                        # Longer utterance — wait 1.2s for potential continuation
+                        self._pending_task = asyncio.create_task(
+                            self._process_pending_transcript()
+                        )
                 elif is_final:
                     self._last_speech = time.time()
 
@@ -416,6 +440,16 @@ class WebPipeline:
             pass
         except Exception as e:
             logger.debug("Speculative LLM failed (expected): %s", e)
+
+    async def _process_pending_transcript(self):
+        """Wait 1.2s then process accumulated transcript. Allows catching split sentences."""
+        await asyncio.sleep(1.2)
+        if self._pending_transcript:
+            text = self._pending_transcript
+            self._pending_transcript = ""
+            self._pending_task = None
+            await self._send_event("transcript", {"role": "user", "text": text})
+            await self._handle_user_input(text)
 
     # ─── User Input Handling ───────────────────────────────────────
 
@@ -519,6 +553,16 @@ class WebPipeline:
 
     async def _respond(self, text: str):
         """Send full response via TTS and update conversation (non-streaming)."""
+        # Strip banned starters the LLM keeps using despite prompt instructions
+        BANNED_STARTERS = ["Look,", "Listen,", "Look ", "Listen "]
+        for starter in BANNED_STARTERS:
+            if text.startswith(starter):
+                text = text[len(starter):].lstrip()
+                # Capitalize first letter
+                if text:
+                    text = text[0].upper() + text[1:]
+                break
+
         # Dedup — only block CONSECUTIVE identical responses
         if self._last_3_responses and text.lower().strip() == self._last_3_responses[-1].lower().strip():
             logger.warning("Skipping consecutive duplicate: '%s'", text[:50])
