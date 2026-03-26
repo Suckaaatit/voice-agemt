@@ -558,9 +558,25 @@ class WebPipeline:
             pass
 
         if response:
-            # Track reframe usage
-            if "something happened tonight" in response.lower() or "something happened at your" in response.lower():
+            # Track and enforce reframe limit (max 3 per call)
+            has_reframe = any(phrase in response.lower() for phrase in [
+                "something happened tonight", "something happened at your",
+                "something went down", "if something happened", "if an incident"
+            ])
+            if has_reframe:
                 self._reframe_count += 1
+                if self._reframe_count > 3:
+                    # Strip the reframe phrase from the response
+                    import re as _re
+                    response = _re.sub(
+                        r',?\s*(so\s+)?if\s+something\s+(happened|went\s+down|occurs?).*?[,?.]',
+                        '.', response, flags=_re.IGNORECASE
+                    ).strip()
+                    # Clean up double periods
+                    response = response.replace('..', '.').strip()
+                    if not response or len(response) < 10:
+                        response = "I hear you."
+                    logger.info("Reframe stripped (count=%d): '%s'", self._reframe_count, response[:60])
             t1 = time.time()
             await self._respond(response)
             tts_ms = (time.time() - t1) * 1000
@@ -569,6 +585,15 @@ class WebPipeline:
 
     async def _respond(self, text: str):
         """Send full response via TTS and update conversation (non-streaming)."""
+        # Strip greeting repetition — greeting is pre-played, never repeat it
+        GREETING_PHRASES = ["this is adam", "adam from god", "god's cleaning crew", "adam with god"]
+        if any(p in text.lower() for p in GREETING_PHRASES) and self._turn_count > 0:
+            # LLM is re-introducing — strip it
+            import re as _re
+            text = _re.sub(r"(?i)(hey,?\s*)?(this is adam|i'm adam|adam from|adam with).*?(crew\.?|\.)", "", text).strip()
+            if not text or len(text) < 5:
+                text = "Yeah, so..."
+
         # Strip banned starters the LLM keeps using despite prompt instructions
         BANNED_STARTERS = ["Look,", "Listen,", "Look ", "Listen "]
         for starter in BANNED_STARTERS:
