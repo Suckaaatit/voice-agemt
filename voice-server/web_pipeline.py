@@ -72,6 +72,7 @@ class WebPipeline:
         self.prospect_name = "Test Caller"
         self.property_name = "Demo Property"
         self.captured_email = ""
+        self._reframe_count = 0  # Track "if something happened tonight" usage (max 3)
         self.captured_phone = ""
         self.key_facts: list[str] = []
 
@@ -375,31 +376,35 @@ class WebPipeline:
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
 
-                    # Cancel previous pending task if still waiting
-                    if self._pending_task and not self._pending_task.done():
-                        self._pending_task.cancel()
-
-                    # Determine wait time based on content
-                    pending = self._pending_transcript
-                    word_count = len(pending.split())
-                    last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
-                    ends_with_comma = pending.rstrip().endswith(",")
+                    # Determine wait time based on NEW transcript content
+                    new_words = transcript.split()
+                    new_word_count = len(new_words)
+                    last_word = transcript.rstrip(".,!?").split()[-1].lower() if transcript.strip() else ""
+                    ends_with_comma = transcript.rstrip().endswith(",")
 
                     # Continuation words = user is mid-thought
                     CONTINUATION_WORDS = {"like", "and", "but", "so", "or", "because", "basically", "actually", "honestly", "well", "um", "uh", "the", "a", "my", "our", "this", "that", "it's", "its", "we", "i", "they"}
 
-                    if word_count <= 3 and last_word not in CONTINUATION_WORDS:
-                        # Short complete response ("okay", "hi", "yeah", "no") — respond after brief wait
-                        self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=0.6)
-                        )
-                    elif ends_with_comma or last_word in CONTINUATION_WORDS:
-                        # Mid-sentence — wait longer for them to finish
+                    is_continuation = ends_with_comma or last_word in CONTINUATION_WORDS
+
+                    # Only cancel previous task if this is a continuation (user still talking)
+                    if is_continuation:
+                        if self._pending_task and not self._pending_task.done():
+                            self._pending_task.cancel()
                         self._pending_task = asyncio.create_task(
                             self._process_pending_transcript(delay=2.0)
                         )
+                    elif self._pending_task and not self._pending_task.done():
+                        # Task already running — let it fire with accumulated text
+                        # New text is already in _pending_transcript
+                        pass
+                    elif new_word_count <= 3:
+                        # Short complete response ("okay", "hi", "yeah") — respond quickly
+                        self._pending_task = asyncio.create_task(
+                            self._process_pending_transcript(delay=0.6)
+                        )
                     else:
-                        # Longer complete utterance — wait 1.2s for potential continuation
+                        # Longer complete utterance — wait for potential continuation
                         self._pending_task = asyncio.create_task(
                             self._process_pending_transcript(delay=1.2)
                         )
@@ -556,6 +561,9 @@ class WebPipeline:
             pass
 
         if response:
+            # Track reframe usage
+            if "something happened tonight" in response.lower() or "something happened at your" in response.lower():
+                self._reframe_count += 1
             t1 = time.time()
             await self._respond(response)
             tts_ms = (time.time() - t1) * 1000
@@ -878,6 +886,10 @@ class WebPipeline:
         state_msg = f"State: {self.state.value} | Prospect: {self.prospect_name} | Property: {self.property_name}"
         if self.key_facts:
             state_msg += f" | Facts: {', '.join(self.key_facts[-5:])}"
+        if self._reframe_count >= 3:
+            state_msg += " | IMPORTANT: You have already used the 'if something happened tonight' reframe 3 times. Do NOT use it again. Find other ways to make your point."
+        else:
+            state_msg += f" | Reframe uses: {self._reframe_count}/3"
 
         # Show last 3 agent responses so LLM can see its own patterns and vary
         recent_starters = []
