@@ -395,15 +395,20 @@ class WebPipeline:
                         self._pending_task = asyncio.create_task(
                             self._process_pending_transcript(delay=2.5)
                         )
-                    elif total_words <= 3:
-                        # Short response — wait a bit for them to add more
+                    elif total_words <= 2:
+                        # Very short ("Yeah.", "Okay.", "No.") — respond fast
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=1.0)
+                            self._process_pending_transcript(delay=0.4)
+                        )
+                    elif total_words <= 5:
+                        # Short phrase — brief wait for continuation
+                        self._pending_task = asyncio.create_task(
+                            self._process_pending_transcript(delay=0.8)
                         )
                     else:
-                        # Complete longer utterance — process after brief pause
+                        # Complete longer utterance — standard pause
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=1.0)
+                            self._process_pending_transcript(delay=1.2)
                         )
                 elif is_final:
                     self._last_speech = time.time()
@@ -913,6 +918,23 @@ class WebPipeline:
         else:
             state_msg += f" | Reframe uses: {self._reframe_count}/3"
 
+        # Track topics already discussed to prevent re-asking
+        discussed = []
+        for msg in self.conversation:
+            content = (msg.get("content") or "").lower()
+            if msg.get("role") == "assistant":
+                if "650" in content or "1100" in content or "flat rate" in content:
+                    discussed.append("pricing")
+                if "4 hour" in content or "response time" in content:
+                    discussed.append("response_time")
+                if "something happened tonight" in content:
+                    discussed.append("reframe_question")
+                if "email" in content and "send" in content:
+                    discussed.append("email_collection")
+        if discussed:
+            unique_topics = list(dict.fromkeys(discussed))
+            state_msg += f" | Already discussed: {', '.join(unique_topics)}. Do NOT repeat these topics."
+
         # Show last 3 agent responses so LLM can see its own patterns and vary
         recent_starters = []
         for msg in reversed(self.conversation):
@@ -1004,7 +1026,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — agent just talks, all actions done manually
             "temperature": 0.4,
-            "max_tokens": 100,
+            "max_tokens": 60,
             "stream": True,
         }
 
@@ -1048,7 +1070,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 100,
+            "max_tokens": 60,
         }
         async with self.http_session.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -1072,7 +1094,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 100,
+            "max_tokens": 60,
         }
         async with self.http_session.post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -1095,7 +1117,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 100,
+            "max_tokens": 60,
         }
         async with self.http_session.post(
             "https://api.openai.com/v1/chat/completions",
