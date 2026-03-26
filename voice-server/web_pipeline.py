@@ -576,16 +576,24 @@ class WebPipeline:
             if has_reframe:
                 self._reframe_count += 1
                 if self._reframe_count > 2:
-                    # Strip the reframe phrase from the response
+                    # Strip ALL reframe variations from the response
                     import re as _re
-                    response = _re.sub(
-                        r',?\s*(so\s+)?if\s+something\s+(happened|went\s+down|occurs?).*?[,?.]',
-                        '.', response, flags=_re.IGNORECASE
-                    ).strip()
-                    # Clean up double periods
-                    response = response.replace('..', '.').strip()
-                    if not response or len(response) < 10:
-                        response = "I hear you."
+                    patterns = [
+                        r',?\s*(so\s+)?if\s+something\s+(happened|went\s+down|occurs?)\s+tonight.*?[.?]',
+                        r',?\s*could\s+response\s+be\s+dispatched.*?[.?]',
+                        r',?\s*would\s+approval\s+still\s+be\s+needed.*?[.?]',
+                        r',?\s*would\s+someone\s+need\s+to\s+(scramble|approve|figure).*?[.?]',
+                        r',?\s*is\s+(the\s+)?response\s+(already\s+)?(authorized|locked\s+in|pre-authorized).*?[.?]',
+                    ]
+                    for pat in patterns:
+                        response = _re.sub(pat, '', response, flags=_re.IGNORECASE)
+                    # Clean up artifacts
+                    response = response.replace('..', '.').replace('. .', '.').strip()
+                    response = response.lstrip('.,;: ')
+                    if response:
+                        response = response[0].upper() + response[1:]
+                    if not response or len(response) < 5:
+                        response = "I hear you, what's on your mind?"
                     logger.info("Reframe stripped (count=%d): '%s'", self._reframe_count, response[:60])
             t1 = time.time()
             await self._respond(response)
@@ -1031,7 +1039,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — agent just talks, all actions done manually
             "temperature": 0.4,
-            "max_tokens": 60,
+            "max_tokens": 40,
             "stream": True,
         }
 
@@ -1075,7 +1083,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 60,
+            "max_tokens": 40,
         }
         async with self.http_session.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -1099,7 +1107,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 60,
+            "max_tokens": 40,
         }
         async with self.http_session.post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -1122,7 +1130,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 60,
+            "max_tokens": 40,
         }
         async with self.http_session.post(
             "https://api.openai.com/v1/chat/completions",
