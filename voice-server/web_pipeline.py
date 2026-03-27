@@ -299,10 +299,20 @@ class WebPipeline:
                 if in_greeting_protection or in_cooldown:
                     continue
 
-                # While agent is speaking, only allow barge-in on FINAL transcripts
+                # While agent is speaking, allow barge-in on FINAL transcripts
+                # Short interrupt-intent phrases bypass the length check
+                INTERRUPT_PHRASES = {
+                    "stop", "wait", "hold on", "just a sec", "one sec",
+                    "hang on", "pause", "no no", "no no no", "excuse me",
+                    "hey", "sorry", "shut up", "enough", "okay stop",
+                    "hold on a sec", "wait wait", "just a second",
+                }
                 if self._speaking.is_set():
                     agent_speaking_for = now - getattr(self, '_agent_speak_start', now)
-                    if is_final and speech_final and len(transcript) > 15 and agent_speaking_for > 1.5:
+                    t_lower = transcript.lower().strip().rstrip(".,!?")
+                    is_interrupt_phrase = t_lower in INTERRUPT_PHRASES or any(t_lower.startswith(p) for p in INTERRUPT_PHRASES)
+                    meets_length = len(transcript) > 15
+                    if is_final and speech_final and (is_interrupt_phrase or meets_length) and agent_speaking_for > 1.0:
                         # Check if this is echo (matches agent's last speech) or real user
                         is_echo = False
                         if self._last_agent_text:
