@@ -791,16 +791,15 @@ class WebPipeline:
 
                     if phase == 1:
                         first_sentence += token
-                        # Strip banned starters from first sentence
-                        if not first_sent:
+                        stripped = first_sentence.rstrip()
+                        if len(stripped) >= 15 and stripped[-1] in SENTENCE_ENDERS:
+                            # Strip banned starters ONCE before sending
                             for banned in ["Look,", "Listen,", "Look ", "Listen "]:
                                 if first_sentence.lstrip().startswith(banned):
                                     first_sentence = first_sentence.lstrip()[len(banned):].lstrip()
                                     if first_sentence:
                                         first_sentence = first_sentence[0].upper() + first_sentence[1:]
                                     break
-                        stripped = first_sentence.rstrip()
-                        if len(stripped) >= 15 and stripped[-1] in SENTENCE_ENDERS:
                             # Got first sentence — send to TTS NOW
                             try:
                                 await cart_ws.send(_make_first_msg(first_sentence))
