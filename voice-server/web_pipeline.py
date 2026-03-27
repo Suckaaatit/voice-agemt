@@ -376,42 +376,28 @@ class WebPipeline:
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
 
-                    # Analyze the FULL accumulated transcript
+                    # Simple two-mode approach: mid-sentence or complete
+                    # Always cancel previous task — restart timer with accumulated text
+                    if self._pending_task and not self._pending_task.done():
+                        self._pending_task.cancel()
+
                     pending = self._pending_transcript
-                    total_words = len(pending.split())
                     last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
                     ends_with_comma = pending.rstrip().endswith(",")
 
-                    # Continuation indicators = user is mid-thought
-                    CONTINUATION_WORDS = {"like", "and", "but", "so", "or", "because", "basically", "actually", "honestly", "well", "um", "uh", "the", "a", "my", "our", "this", "that", "it's", "its", "we", "i", "they", "see", "now", "right"}
-                    is_continuation = ends_with_comma or last_word in CONTINUATION_WORDS
+                    # Only these words clearly indicate mid-sentence
+                    MID_SENTENCE = {"like", "and", "but", "so", "or", "because", "the", "a", "my", "our", "i"}
+                    is_mid = ends_with_comma or last_word in MID_SENTENCE
 
-                    if is_continuation:
-                        # User still mid-sentence — cancel old timer, start longer wait
-                        if self._pending_task and not self._pending_task.done():
-                            self._pending_task.cancel()
+                    if is_mid:
+                        # Mid-sentence — wait 1.5s for them to finish
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=2.5)
-                        )
-                    elif self._pending_task and not self._pending_task.done():
-                        # Task already running — DON'T cancel it
-                        # New text is accumulated in _pending_transcript
-                        # The existing timer will fire and process everything
-                        pass
-                    elif total_words <= 2:
-                        # Very short ("Yeah.", "Okay.", "No.") — respond fast
-                        self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=0.4)
-                        )
-                    elif total_words <= 5:
-                        # Short phrase — brief wait for continuation
-                        self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=0.8)
+                            self._process_pending_transcript(delay=1.5)
                         )
                     else:
-                        # Complete longer utterance — standard pause
+                        # Complete thought — process after 0.4s
                         self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=1.2)
+                            self._process_pending_transcript(delay=0.4)
                         )
                 elif is_final:
                     self._last_speech = time.time()
@@ -1056,7 +1042,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             # No tools — agent just talks, all actions done manually
             "temperature": 0.4,
             # First 2 turns need more tokens for pitch context, then shorter
-            "max_tokens": 80 if self._turn_count <= 2 else 45,
+            "max_tokens": 80 if self._turn_count <= 2 else 60,
             "stream": True,
         }
 
@@ -1100,7 +1086,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 80 if self._turn_count <= 2 else 45,
+            "max_tokens": 80 if self._turn_count <= 2 else 60,
         }
         async with self.http_session.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -1124,7 +1110,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 80 if self._turn_count <= 2 else 45,
+            "max_tokens": 80 if self._turn_count <= 2 else 60,
         }
         async with self.http_session.post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -1147,7 +1133,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 80 if self._turn_count <= 2 else 45,
+            "max_tokens": 80 if self._turn_count <= 2 else 60,
         }
         async with self.http_session.post(
             "https://api.openai.com/v1/chat/completions",
