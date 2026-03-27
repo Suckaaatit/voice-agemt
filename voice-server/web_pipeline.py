@@ -537,55 +537,20 @@ class WebPipeline:
             self._speculative_task.cancel()
         self._speculative_result = None
 
-        # ── Play filler while LLM thinks (cuts perceived latency from 1.2s to ~200ms) ──
+        # ── Streaming LLM→TTS: tokens stream directly into Cartesia ──
+        # Filler plays first (~200ms), then LLM tokens flow into TTS as they arrive
+        # This saves ~300ms vs blocking (LLM finish → then TTS start)
         t0 = time.time()
-        filler = random.choice(FILLERS)
-        filler_task = asyncio.create_task(self._speak(filler))
-
-        # Start LLM in parallel
-        response = await self._call_llm(text)
-        llm_ms = (time.time() - t0) * 1000
-        logger.info("⚡ LLM total: %.0fms | Response: '%s'", llm_ms, (response or "")[:60])
-
-        # Wait for filler to finish (it's short, ~300ms)
         try:
-            await asyncio.wait_for(filler_task, timeout=2.0)
-        except (asyncio.TimeoutError, Exception):
-            pass
-
-        if response:
-            # Track and enforce reframe limit (max 3 per call)
-            has_reframe = any(phrase in response.lower() for phrase in [
-                "something happened tonight", "something happened at your",
-                "something went down", "if something happened", "if an incident"
-            ])
-            if has_reframe:
-                self._reframe_count += 1
-                if self._reframe_count > 2:
-                    # Strip ALL reframe variations from the response
-                    import re as _re
-                    patterns = [
-                        r',?\s*(so\s+)?if\s+something\s+(happened|went\s+down|occurs?)\s+tonight.*?[.?]',
-                        r',?\s*could\s+response\s+be\s+dispatched.*?[.?]',
-                        r',?\s*would\s+approval\s+still\s+be\s+needed.*?[.?]',
-                        r',?\s*would\s+someone\s+need\s+to\s+(scramble|approve|figure).*?[.?]',
-                        r',?\s*is\s+(the\s+)?response\s+(already\s+)?(authorized|locked\s+in|pre-authorized).*?[.?]',
-                    ]
-                    for pat in patterns:
-                        response = _re.sub(pat, '', response, flags=_re.IGNORECASE)
-                    # Clean up artifacts
-                    response = response.replace('..', '.').replace('. .', '.').strip()
-                    response = response.lstrip('.,;: ')
-                    if response:
-                        response = response[0].upper() + response[1:]
-                    if not response or len(response) < 5:
-                        response = "I hear you, what's on your mind?"
-                    logger.info("Reframe stripped (count=%d): '%s'", self._reframe_count, response[:60])
-            t1 = time.time()
-            await self._respond(response)
-            tts_ms = (time.time() - t1) * 1000
-            total_ms = (time.time() - t0) * 1000
-            logger.info("⚡ TTS: %.0fms | Total turn: %.0fms", tts_ms, total_ms)
+            await self._respond_streaming(text)
+        except Exception as e:
+            logger.warning("Streaming failed, falling back to blocking: %s", e)
+            # Fallback: blocking LLM → TTS
+            response = await self._call_llm(text)
+            if response:
+                await self._respond(response)
+        total_ms = (time.time() - t0) * 1000
+        logger.info("⚡ Total turn: %.0fms", total_ms)
 
     async def _respond(self, text: str):
         """Send full response via TTS and update conversation (non-streaming)."""
@@ -644,6 +609,10 @@ class WebPipeline:
 
     async def _respond_streaming(self, user_text: str):
         """Stream LLM → Cartesia TTS — single continuous context, no gaps."""
+        # Play filler FIRST while LLM starts generating
+        filler = random.choice(FILLERS)
+        await self._speak(filler)
+
         self._interrupt.clear()
         self._speaking.set()
         await self._send_event("agent_talking", {"value": True})
