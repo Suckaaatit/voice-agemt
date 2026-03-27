@@ -413,10 +413,24 @@ class WebPipeline:
 
         except websockets.exceptions.ConnectionClosed:
             if not self._shutdown.is_set():
-                logger.warning("Deepgram connection closed unexpectedly")
+                logger.warning("Deepgram connection closed — reconnecting...")
+                try:
+                    await self._connect_deepgram()
+                    # Restart processing in a new task
+                    self._tasks.append(asyncio.create_task(self._process_deepgram()))
+                    return  # Don't shutdown — new task takes over
+                except Exception as e2:
+                    logger.error("Deepgram reconnect failed: %s", e2)
         except Exception as e:
             if not self._shutdown.is_set():
                 logger.error("Deepgram processing error: %s", e, exc_info=True)
+                # Try to reconnect once before giving up
+                try:
+                    await self._connect_deepgram()
+                    self._tasks.append(asyncio.create_task(self._process_deepgram()))
+                    return
+                except Exception:
+                    pass
         self._shutdown.set()
 
     # ─── Text Similarity (for speculative dedup) ─────────────────
@@ -458,14 +472,19 @@ class WebPipeline:
 
     async def _process_pending_transcript(self, delay: float = 1.2):
         """Wait then process accumulated transcript. Delay varies by utterance type."""
-        await asyncio.sleep(delay)
-        if self._pending_transcript and not self._shutdown.is_set():
-            text = self._pending_transcript
-            self._pending_transcript = ""
-            self._pending_task = None
-            logger.info("Processing accumulated transcript (delay=%.1fs): '%s'", delay, text[:60])
-            await self._send_event("transcript", {"role": "user", "text": text})
-            await self._handle_user_input(text)
+        try:
+            await asyncio.sleep(delay)
+            if self._pending_transcript and not self._shutdown.is_set():
+                text = self._pending_transcript
+                self._pending_transcript = ""
+                self._pending_task = None
+                logger.info("Processing accumulated transcript (delay=%.1fs): '%s'", delay, text[:60])
+                await self._send_event("transcript", {"role": "user", "text": text})
+                await self._handle_user_input(text)
+        except asyncio.CancelledError:
+            pass  # Normal — cancelled by new transcript
+        except Exception as e:
+            logger.error("Error processing transcript: %s", e, exc_info=True)
 
     # ─── User Input Handling ───────────────────────────────────────
 
