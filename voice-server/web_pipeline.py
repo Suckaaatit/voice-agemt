@@ -665,6 +665,7 @@ class WebPipeline:
 
             async with websockets.connect(url) as cart_ws:
                 audio_done = asyncio.Event()
+                text_complete = asyncio.Event()  # Set when all text sent to Cartesia
 
                 # ── Audio drain — runs in background, sends audio to browser ──
                 async def drain_audio():
@@ -693,9 +694,9 @@ class WebPipeline:
                                 audio_bytes = base64.b64decode(data["data"])
                                 await self._send_audio(audio_bytes)
                             elif data.get("type") == "done":
-                                # "done" means one chunk is complete, but more may come (continue mode)
-                                # Only exit when connection closes or interrupt
-                                continue
+                                if text_complete.is_set():
+                                    break  # All text sent + this chunk done = finished
+                                continue  # More text coming — wait for next chunk
                             elif data.get("type") == "error":
                                 logger.warning("Cartesia error: %s", data.get("error"))
                                 break
@@ -805,13 +806,17 @@ class WebPipeline:
                             "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
                             "continue": True,
                         }))
+                        text_complete.set()  # Signal drain_audio: no more text coming
                     except Exception:
                         pass
+                else:
+                    text_complete.set()  # No remainder — signal done
 
                 # Edge case: LLM response was just one sentence (no remainder)
                 if not first_sent and full_response.strip() and not self._interrupt.is_set():
                     try:
                         await cart_ws.send(_make_first_msg(full_response))
+                        text_complete.set()  # Single sentence — signal done
                     except Exception:
                         pass
 
