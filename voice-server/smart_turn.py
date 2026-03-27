@@ -9,30 +9,31 @@ import re
 
 logger = logging.getLogger("smart-turn")
 
-# Lazy-load classifier
+# Pre-load classifier at import time (not lazy)
 _classifier = None
-_loading = False
-
 
 def _get_classifier():
-    global _classifier, _loading
+    global _classifier
     if _classifier is not None:
         return _classifier
-    if _loading:
-        return None
-    _loading = True
     try:
         from transformers import pipeline as hf_pipeline
+        logger.info("Loading Smart Turn classifier (DistilBERT)...")
         _classifier = hf_pipeline(
             "text-classification",
             model="KoljaB/SentenceFinishedClassification",
             device=-1,  # CPU
         )
-        logger.info("Smart Turn classifier loaded (DistilBERT)")
+        logger.info("Smart Turn classifier loaded")
     except Exception as e:
         logger.error("Failed to load Smart Turn classifier: %s", e)
-    _loading = False
     return _classifier
+
+# Pre-load on import — blocks startup for ~10s but prevents mid-call delay
+try:
+    _get_classifier()
+except Exception:
+    pass
 
 
 # Words that clearly indicate user is mid-sentence

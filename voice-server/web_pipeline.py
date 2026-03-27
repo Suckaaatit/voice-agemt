@@ -162,6 +162,7 @@ class WebPipeline:
             self._tasks.append(asyncio.create_task(self._silence_watchdog()))
             self._tasks.append(asyncio.create_task(self._backchanneling_monitor()))
             self._tasks.append(asyncio.create_task(self._utterance_timeout_monitor()))
+            self._tasks.append(asyncio.create_task(self._deepgram_keepalive()))
 
             # Wait for shutdown
             await self._shutdown.wait()
@@ -1353,6 +1354,18 @@ Only one tag per response. Tag goes FIRST, before the text.
                         await self._send_audio(chunk)
                     except Exception:
                         return
+
+    # ─── Deepgram Keepalive ──────────────────────────────────────────
+
+    async def _deepgram_keepalive(self):
+        """Send KeepAlive to Deepgram every 5s to prevent timeout disconnects."""
+        while not self._shutdown.is_set():
+            await asyncio.sleep(5)
+            if self.dg_ws and not self._shutdown.is_set():
+                try:
+                    await self.dg_ws.send(json.dumps({"type": "KeepAlive"}))
+                except Exception:
+                    pass  # Connection already dead — reconnect will handle it
 
     # ─── Silence Watchdog ──────────────────────────────────────────
 
