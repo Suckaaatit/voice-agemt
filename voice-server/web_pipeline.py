@@ -234,8 +234,8 @@ class WebPipeline:
         url = (
             "wss://api.deepgram.com/v1/listen?"
             "encoding=linear16&sample_rate=16000&channels=1"
-            "&model=nova-3&smart_format=true&endpointing=500"
-            "&interim_results=true&utterance_end_ms=2000"
+            "&model=nova-3&smart_format=true&endpointing=300"
+            "&interim_results=true&utterance_end_ms=1000"
         )
         self.dg_ws = await websockets.connect(
             url,
