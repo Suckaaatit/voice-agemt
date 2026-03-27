@@ -17,6 +17,7 @@ import aiohttp
 import websockets
 
 from config import config
+from smart_turn import predict_turn_complete, get_dynamic_delay
 from pipeline import (
     HARD_NO_PATTERNS, BUSY_PATTERNS, CHECK_LATER_PATTERNS,
     CONNECTORS, NEGATION_PREFIXES, AVAILABILITY_CONNECTORS,
@@ -132,6 +133,10 @@ class WebPipeline:
         self._pending_transcript: str = ""
         self._pending_task: Optional[asyncio.Task] = None
 
+        # Smart Turn audio buffer — last 8s of user audio for ML turn detection
+        self._audio_buffer = bytearray()
+        self._audio_buffer_max = 16000 * 2 * 8  # 8 seconds of 16kHz 16-bit PCM
+
         # Per-component latency tracking
         self._latency: dict = {"stt": [], "llm": [], "tts": [], "total": []}
 
@@ -190,7 +195,11 @@ class WebPipeline:
                         # First byte = isTTSPlaying flag from browser
                         self._tts_playing_on_client = (audio[0] == 1)
                         pcm_data = audio[1:]
-                        # Send all audio to Deepgram — echo handled by barge-in threshold
+                        # Send all audio to Deepgram + buffer for Smart Turn
+                        # Buffer last 8s of audio for ML turn detection
+                        self._audio_buffer.extend(pcm_data)
+                        if len(self._audio_buffer) > self._audio_buffer_max:
+                            self._audio_buffer = self._audio_buffer[-self._audio_buffer_max:]
                         try:
                             await self.dg_ws.send(pcm_data)
                             if not hasattr(self, '_audio_log_count'):
@@ -376,28 +385,28 @@ class WebPipeline:
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
 
-                    # Simple two-mode approach: mid-sentence or complete
-                    # Always cancel previous task — restart timer with accumulated text
+                    # ML-based turn detection using Smart Turn v3.1
+                    # Analyzes raw AUDIO (not just text) to determine if user is done
                     if self._pending_task and not self._pending_task.done():
                         self._pending_task.cancel()
 
-                    pending = self._pending_transcript
-                    last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
-                    ends_with_comma = pending.rstrip().endswith(",")
+                    # Run Smart Turn on accumulated transcript text
+                    try:
+                        result = predict_turn_complete(text=self._pending_transcript)
+                        delay = get_dynamic_delay(result["probability"])
+                        logger.info("Smart Turn: complete=%s prob=%.2f delay=%.2fs transcript='%s'",
+                                    result["complete"], result["probability"], delay, self._pending_transcript[:40])
+                    except Exception as e:
+                        logger.warning("Smart Turn failed, using fallback: %s", e)
+                        # Fallback: text-based heuristic
+                        pending = self._pending_transcript
+                        last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
+                        ends_with_comma = pending.rstrip().endswith(",")
+                        MID_SENTENCE = {"like", "and", "but", "so", "or", "because", "the", "a", "my", "our", "i"}
+                        delay = 1.5 if (ends_with_comma or last_word in MID_SENTENCE) else 0.4
 
-                    # Only these words clearly indicate mid-sentence
-                    MID_SENTENCE = {"like", "and", "but", "so", "or", "because", "the", "a", "my", "our", "i"}
-                    is_mid = ends_with_comma or last_word in MID_SENTENCE
-
-                    if is_mid:
-                        # Mid-sentence — wait 1.5s for them to finish
-                        self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=1.5)
-                        )
-                    else:
-                        # Complete thought — process after 0.4s
-                        self._pending_task = asyncio.create_task(
-                            self._process_pending_transcript(delay=0.4)
+                    self._pending_task = asyncio.create_task(
+                        self._process_pending_transcript(delay=delay)
                         )
                 elif is_final:
                     self._last_speech = time.time()
