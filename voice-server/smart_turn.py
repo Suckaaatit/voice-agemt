@@ -41,7 +41,18 @@ MID_SENTENCE_WORDS = {
     "like", "and", "but", "so", "or", "because", "basically",
     "the", "a", "my", "our", "i", "we", "they", "this", "that",
     "um", "uh", "well", "actually", "honestly", "see",
+    "about", "how", "what", "why", "when", "where", "which",
+    "if", "then", "also", "just", "maybe", "probably",
 }
+
+# Phrases that ALWAYS mean "more is coming" — never treat as complete
+MID_SENTENCE_PHRASES = [
+    "tell me", "let me", "show me", "give me", "send me",
+    "what about", "how about", "what if", "so basically",
+    "okay so", "right so", "yeah so", "and then", "but what",
+    "i want", "i need", "i think", "i mean", "can you",
+    "do you", "would you", "could you", "is there", "are there",
+]
 
 # Short words that are clearly complete answers
 COMPLETE_SHORT = {
@@ -68,6 +79,12 @@ def predict_turn_complete(text: str = "", audio_pcm_16k=None) -> dict:
     last_word = words[-1] if words else ""
 
     # ── Heuristic layer (fast, handles edge cases ML misses) ──
+    text_lower = text.lower()
+
+    # Check for mid-sentence PHRASES first (highest priority)
+    for phrase in MID_SENTENCE_PHRASES:
+        if text_lower.rstrip(".,!?").endswith(phrase) or text_lower.rstrip(".,!?").endswith(phrase + "."):
+            return {"complete": False, "probability": 0.05}
 
     # Very short complete answers (1 word)
     if word_count <= 2 and last_word in COMPLETE_SHORT:
