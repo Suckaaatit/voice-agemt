@@ -295,13 +295,14 @@ class WebPipeline:
                 # 2. Cooldown — don't allow rapid-fire barge-ins
                 in_cooldown = now < self._barge_in_cooldown_until
 
+                # Block barge-in during greeting and cooldown
+                if in_greeting_protection or in_cooldown:
+                    continue
+
                 # While agent is speaking, only allow barge-in on FINAL transcripts
-                # that are long enough to be real user speech (not echo)
-                # Echo from speakers is typically short fragments. Real interrupts are longer.
                 if self._speaking.is_set():
-                    # Time guard: no barge-in within 2s of agent starting to speak
                     agent_speaking_for = now - getattr(self, '_agent_speak_start', now)
-                    if is_final and speech_final and len(transcript) > 35 and agent_speaking_for > 2.0:
+                    if is_final and speech_final and len(transcript) > 15 and agent_speaking_for > 1.5:
                         # Check if this is echo (matches agent's last speech) or real user
                         is_echo = False
                         if self._last_agent_text:
@@ -318,6 +319,11 @@ class WebPipeline:
                             logger.info("Barge-in (real): '%s'", transcript[:50])
                             self._interrupt.set()
                             self._speaking.clear()
+                            # Cancel any pending transcript to prevent duplicate responses
+                            if self._pending_task and not self._pending_task.done():
+                                self._pending_task.cancel()
+                            self._pending_transcript = ""
+                            self._valid_seqs.clear()  # Invalidate old responses
                             await self._send_event("agent_talking", {"value": False})
                             self.is_first_response = False
                             self._last_speech = time.time()
@@ -414,24 +420,29 @@ class WebPipeline:
 
         except websockets.exceptions.ConnectionClosed:
             if not self._shutdown.is_set():
-                logger.warning("Deepgram connection closed — reconnecting...")
-                try:
-                    await self._connect_deepgram()
-                    # Restart processing in a new task
-                    self._tasks.append(asyncio.create_task(self._process_deepgram()))
-                    return  # Don't shutdown — new task takes over
-                except Exception as e2:
-                    logger.error("Deepgram reconnect failed: %s", e2)
+                self._dg_reconnect_count = getattr(self, '_dg_reconnect_count', 0) + 1
+                if self._dg_reconnect_count <= 3:
+                    logger.warning("Deepgram disconnected — reconnecting (%d/3)...", self._dg_reconnect_count)
+                    try:
+                        await asyncio.sleep(0.5 * self._dg_reconnect_count)  # Backoff
+                        await self._connect_deepgram()
+                        self._tasks.append(asyncio.create_task(self._process_deepgram()))
+                        return
+                    except Exception as e2:
+                        logger.error("Deepgram reconnect failed: %s", e2)
+                else:
+                    logger.error("Deepgram reconnect limit reached (3/3) — shutting down")
         except Exception as e:
             if not self._shutdown.is_set():
                 logger.error("Deepgram processing error: %s", e, exc_info=True)
-                # Try to reconnect once before giving up
-                try:
-                    await self._connect_deepgram()
-                    self._tasks.append(asyncio.create_task(self._process_deepgram()))
-                    return
-                except Exception:
-                    pass
+                self._dg_reconnect_count = getattr(self, '_dg_reconnect_count', 0) + 1
+                if self._dg_reconnect_count <= 3:
+                    try:
+                        await self._connect_deepgram()
+                        self._tasks.append(asyncio.create_task(self._process_deepgram()))
+                        return
+                    except Exception:
+                        pass
         self._shutdown.set()
 
     # ─── Text Similarity (for speculative dedup) ─────────────────
@@ -638,16 +649,19 @@ class WebPipeline:
 
     async def _respond_streaming(self, user_text: str):
         """Stream LLM → Cartesia TTS — single continuous context, no gaps."""
-        # Play filler FIRST while LLM starts generating
+        # Set speaking BEFORE filler to prevent echo gap
+        self._interrupt.clear()
+        self._speaking.set()
+        self._agent_speak_start = time.time()
+        await self._send_event("agent_talking", {"value": True})
+
+        # Play filler while LLM starts generating
         filler = random.choice(FILLERS)
         await self._speak(filler)
 
-        self._interrupt.clear()
-        self._speaking.set()
-        await self._send_event("agent_talking", {"value": True})
-
         self._response_seq += 1
         my_seq = self._response_seq
+        self._valid_seqs.clear()  # Invalidate all old responses
         self._valid_seqs.add(my_seq)
 
         turn_start = time.time()
@@ -817,13 +831,16 @@ class WebPipeline:
                 if not first_sent and full_response.strip() and not self._interrupt.is_set():
                     try:
                         await cart_ws.send(_make_first_msg(full_response))
-                        text_complete.set()  # Single sentence — signal done
                     except Exception:
                         pass
 
+                # Ensure text_complete is ALWAYS set before waiting for drain
+                if not text_complete.is_set():
+                    text_complete.set()
+
                 # Wait for all audio to finish playing
                 try:
-                    await asyncio.wait_for(audio_done.wait(), timeout=15.0)
+                    await asyncio.wait_for(audio_done.wait(), timeout=10.0)
                 except asyncio.TimeoutError:
                     logger.warning("Audio drain timeout")
                 drain_task.cancel()
@@ -1460,19 +1477,27 @@ Only one tag per response. Tag goes FIRST, before the text.
             pass
 
     async def cleanup(self):
-        """Clean up all connections."""
+        """Clean up all connections and tasks."""
         if self._cleaned_up:
             return
         self._cleaned_up = True
         self._shutdown.set()
+
+        # Cancel speculative and pending tasks
+        for t in [self._speculative_task, self._pending_task]:
+            if t and not t.done():
+                t.cancel()
 
         for task in self._tasks:
             task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
+        # Send CloseStream to Deepgram for clean shutdown
         if self.dg_ws:
             try:
+                await self.dg_ws.send(json.dumps({"type": "CloseStream"}))
+                await asyncio.sleep(0.1)
                 await self.dg_ws.close()
             except Exception:
                 pass
