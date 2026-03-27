@@ -402,17 +402,29 @@ class WebPipeline:
                     self._last_interim_text = ""
                     self._last_interim_time = 0.0
 
-                    # ML-based turn detection using Smart Turn v3.1
-                    # Analyzes raw AUDIO (not just text) to determine if user is done
+                    # ML-based turn detection on ACCUMULATED transcript
+                    # Always cancel previous pending — we'll re-evaluate with full text
                     if self._pending_task and not self._pending_task.done():
                         self._pending_task.cancel()
 
-                    # Run Smart Turn on accumulated transcript text
+                    accumulated = self._pending_transcript
+                    acc_words = len(accumulated.split())
+
                     try:
-                        result = predict_turn_complete(text=self._pending_transcript)
+                        result = predict_turn_complete(text=accumulated)
                         delay = get_dynamic_delay(result["probability"])
-                        logger.info("Smart Turn: complete=%s prob=%.2f delay=%.2fs transcript='%s'",
-                                    result["complete"], result["probability"], delay, self._pending_transcript[:40])
+
+                        # For longer accumulated text (5+ words), add extra delay
+                        # because the user is clearly in the middle of a thought
+                        if acc_words >= 5 and not result["complete"]:
+                            delay = max(delay, 2.0)  # At least 2s for long incomplete
+                        elif acc_words >= 5 and result["complete"]:
+                            delay = max(delay, 1.2)  # At least 1.2s even if "complete" — catch continuations
+                        elif acc_words >= 3 and result["probability"] < 0.8:
+                            delay = max(delay, 1.5)  # Ambiguous short text — wait longer
+
+                        logger.info("Smart Turn: complete=%s prob=%.2f delay=%.2fs words=%d transcript='%s'",
+                                    result["complete"], result["probability"], delay, acc_words, accumulated[:50])
                     except Exception as e:
                         logger.warning("Smart Turn failed, using fallback: %s", e)
                         # Fallback: text-based heuristic
