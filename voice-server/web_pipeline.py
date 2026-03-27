@@ -692,6 +692,10 @@ class WebPipeline:
                                     logger.info("⚡ TTS first audio: %.0fms | Total: %.0fms", tts_lat, total_lat)
                                 audio_bytes = base64.b64decode(data["data"])
                                 await self._send_audio(audio_bytes)
+                            elif data.get("type") == "done":
+                                # "done" means one chunk is complete, but more may come (continue mode)
+                                # Only exit when connection closes or interrupt
+                                continue
                             elif data.get("type") == "error":
                                 logger.warning("Cartesia error: %s", data.get("error"))
                                 break
@@ -791,6 +795,16 @@ class WebPipeline:
                     try:
                         await cart_ws.send(_make_continue_msg(remainder))
                         logger.info("⚡ Phase 2: sent remainder (%d chars)", len(remainder))
+                        # Signal end of text — Cartesia needs this to flush final audio
+                        await cart_ws.send(json.dumps({
+                            "model_id": "sonic-3",
+                            "transcript": "",
+                            "voice": {"mode": "id", "id": voice_id},
+                            "language": "en",
+                            "context_id": context_id,
+                            "output_format": {"container": "raw", "encoding": "pcm_s16le", "sample_rate": 24000},
+                            "continue": True,
+                        }))
                     except Exception:
                         pass
 
