@@ -52,6 +52,8 @@ MID_SENTENCE_PHRASES = [
     "okay so", "right so", "yeah so", "and then", "but what",
     "i want", "i need", "i think", "i mean", "can you",
     "do you", "would you", "could you", "is there", "are there",
+    "i said", "no i", "no no", "wait i", "hold on",
+    "for you", "for you to", "what i", "what i meant",
 ]
 
 # Short words that are clearly complete answers
