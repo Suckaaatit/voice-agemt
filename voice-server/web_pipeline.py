@@ -51,7 +51,7 @@ BACKCHANNELS = {
 # ─── Emotion tag mapping for Cartesia ────────────────────────────
 EMOTION_MAP = {
     "[calm]": ["positivity:low", "curiosity:low"],
-    "[warm]": ["positivity:high", "curiosity:medium"],
+    "[warm]": ["positivity:high", "curiosity:low"],
     "[steady]": ["positivity:low", "curiosity:low"],
     "[excited]": ["positivity:high", "curiosity:high"],
 }
@@ -722,7 +722,7 @@ class WebPipeline:
                             "id": voice_id,
                             "__experimental_controls": {
                                 "speed": "slowest",
-                                "emotion": ["positivity:medium", "curiosity:low"],
+                                "emotion": ["positivity:low", "curiosity:low"],
                             },
                         },
                         "language": "en",
