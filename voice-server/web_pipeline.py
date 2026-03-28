@@ -132,6 +132,10 @@ class WebPipeline:
         # Transcript accumulation — prevents splitting "okay, how did you get my number?" into two
         self._pending_transcript: str = ""
         self._pending_task: Optional[asyncio.Task] = None
+        self._pending_gen: int = 0  # Generation counter — prevents race condition
+
+        # Context tracking — prevents repeating questions user already answered
+        self._core_question_answered: bool = False
 
         # Smart Turn audio buffer — last 8s of user audio for ML turn detection
         self._audio_buffer = bytearray()
@@ -312,7 +316,7 @@ class WebPipeline:
                     t_lower = transcript.lower().strip().rstrip(".,!?")
                     is_interrupt_phrase = t_lower in INTERRUPT_PHRASES or any(t_lower.startswith(p) for p in INTERRUPT_PHRASES)
                     meets_length = len(transcript) > 15
-                    if is_final and speech_final and (is_interrupt_phrase or meets_length) and agent_speaking_for > 1.0:
+                    if is_final and speech_final and (is_interrupt_phrase or meets_length) and agent_speaking_for > 2.0:
                         # Check if this is echo (matches agent's last speech) or real user
                         is_echo = False
                         if self._last_agent_text:
@@ -431,12 +435,21 @@ class WebPipeline:
                         pending = self._pending_transcript
                         last_word = pending.rstrip(".,!?").split()[-1].lower() if pending.strip() else ""
                         ends_with_comma = pending.rstrip().endswith(",")
-                        MID_SENTENCE = {"like", "and", "but", "so", "or", "because", "the", "a", "my", "our", "i"}
-                        delay = 1.5 if (ends_with_comma or last_word in MID_SENTENCE) else 0.4
+                        MID_SENTENCE = {"like", "and", "but", "so", "or", "because", "the", "a", "my", "our", "i",
+                                        "what", "how", "why", "who", "where", "when", "which", "tell",
+                                        "about", "if", "whether", "that", "this", "then", "basically"}
+                        # Check for multi-word mid-sentence phrases
+                        MID_PHRASES = ["so what", "what about", "how about", "what if", "why don't",
+                                       "why can't", "tell me", "can you", "could you", "would you",
+                                       "i think", "i mean", "i said", "i was", "i want", "for you"]
+                        is_mid = ends_with_comma or last_word in MID_SENTENCE or any(pending.lower().rstrip(".,!?").endswith(p) for p in MID_PHRASES)
+                        delay = 1.5 if is_mid else 0.4
 
+                    self._pending_gen += 1
+                    gen = self._pending_gen
                     self._pending_task = asyncio.create_task(
-                        self._process_pending_transcript(delay=delay)
-                        )
+                        self._process_pending_transcript(delay=delay, gen=gen)
+                    )
                 elif is_final:
                     self._last_speech = time.time()
 
@@ -504,15 +517,18 @@ class WebPipeline:
         except Exception as e:
             logger.debug("Speculative LLM failed (expected): %s", e)
 
-    async def _process_pending_transcript(self, delay: float = 1.2):
-        """Wait then process accumulated transcript. Delay varies by utterance type."""
+    async def _process_pending_transcript(self, delay: float = 1.2, gen: int = 0):
+        """Wait then process accumulated transcript. Generation counter prevents race conditions."""
         try:
             await asyncio.sleep(delay)
+            # Check generation — if gen doesn't match, a newer transcript superseded this
+            if gen != self._pending_gen:
+                return  # Stale — don't process
             if self._pending_transcript and not self._shutdown.is_set():
                 text = self._pending_transcript
                 self._pending_transcript = ""
                 self._pending_task = None
-                logger.info("Processing accumulated transcript (delay=%.1fs): '%s'", delay, text[:60])
+                logger.info("Processing accumulated transcript (delay=%.1fs gen=%d): '%s'", delay, gen, text[:60])
                 await self._send_event("transcript", {"role": "user", "text": text})
                 await self._handle_user_input(text)
         except asyncio.CancelledError:
@@ -527,6 +543,13 @@ class WebPipeline:
         text_lower = text.lower().strip()
         if not text_lower:
             return
+
+        # Track if user answered the core question (prevents agent re-asking)
+        ANSWERED_PHRASES = ["i have a plan", "we have someone", "already covered", "we're set up",
+                           "locked in", "we have a plan", "got it covered", "we're covered",
+                           "have a backup", "already have", "we do have", "yes we do"]
+        if any(p in text_lower for p in ANSWERED_PHRASES):
+            self._core_question_answered = True
 
         # ── Backchannel detection — only ignore if agent is CURRENTLY speaking ──
         word_count = len(text_lower.split())
@@ -816,12 +839,15 @@ class WebPipeline:
                         stripped = first_sentence.rstrip()
                         if len(stripped) >= 15 and stripped[-1] in SENTENCE_ENDERS:
                             # Strip banned starters ONCE before sending
-                            for banned in ["Look,", "Listen,", "Look ", "Listen "]:
-                                if first_sentence.lstrip().startswith(banned):
-                                    first_sentence = first_sentence.lstrip()[len(banned):].lstrip()
-                                    if first_sentence:
-                                        first_sentence = first_sentence[0].upper() + first_sentence[1:]
+                            BANNED = ["Look,", "Listen,", "Look ", "Listen "]
+                            cleaned = first_sentence.strip()
+                            for banned in BANNED:
+                                if cleaned.startswith(banned):
+                                    cleaned = cleaned[len(banned):].lstrip()
+                                    if cleaned:
+                                        cleaned = cleaned[0].upper() + cleaned[1:]
                                     break
+                            first_sentence = cleaned  # USE the cleaned version
                             # Got first sentence — send to TTS NOW
                             try:
                                 await cart_ws.send(_make_first_msg(first_sentence))
@@ -995,6 +1021,8 @@ class WebPipeline:
             state_msg += " | IMPORTANT: You have already used the 'if something happened tonight' reframe 3 times. Do NOT use it again. Find other ways to make your point."
         else:
             state_msg += f" | Reframe uses: {self._reframe_count}/3"
+        if self._core_question_answered:
+            state_msg += " | USER ALREADY ANSWERED: they have a plan/coverage in place. Do NOT ask 'if something happened tonight' again. Move to comparing their plan vs yours, or pricing, or closing."
 
         # Track topics already discussed to prevent re-asking
         discussed = []
