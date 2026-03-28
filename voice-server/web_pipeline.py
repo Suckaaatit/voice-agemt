@@ -441,7 +441,11 @@ class WebPipeline:
                         # Check for multi-word mid-sentence phrases
                         MID_PHRASES = ["so what", "what about", "how about", "what if", "why don't",
                                        "why can't", "tell me", "can you", "could you", "would you",
-                                       "i think", "i mean", "i said", "i was", "i want", "for you"]
+                                       "i think", "i mean", "i said", "i was", "i want", "for you",
+                                       "no i", "no what", "no but", "yeah but", "okay but", "okay so",
+                                       "so tell", "what is", "how is", "where is", "who is", "when is",
+                                       "do you", "are you", "is it", "can i", "should i", "will you",
+                                       "let me", "hold on", "wait", "actually", "the thing is"]
                         is_mid = ends_with_comma or last_word in MID_SENTENCE or any(pending.lower().rstrip(".,!?").endswith(p) for p in MID_PHRASES)
                         delay = 1.5 if is_mid else 0.4
 
@@ -838,16 +842,32 @@ class WebPipeline:
                         first_sentence += token
                         stripped = first_sentence.rstrip()
                         if len(stripped) >= 15 and stripped[-1] in SENTENCE_ENDERS:
-                            # Strip banned starters ONCE before sending
-                            BANNED = ["Look,", "Listen,", "Look ", "Listen "]
+                            # Strip ALL banned starters (Look, Listen, So consecutive)
                             cleaned = first_sentence.strip()
+                            BANNED = ["Look,", "Listen,", "Look ", "Listen ", "look,", "listen,"]
                             for banned in BANNED:
                                 if cleaned.startswith(banned):
                                     cleaned = cleaned[len(banned):].lstrip()
                                     if cleaned:
                                         cleaned = cleaned[0].upper() + cleaned[1:]
                                     break
-                            first_sentence = cleaned  # USE the cleaned version
+                            # Also strip "So" if consecutive
+                            if not hasattr(self, '_so_count'):
+                                self._so_count = 0
+                            if cleaned.startswith("So,") or cleaned.startswith("So "):
+                                self._so_count += 1
+                                if self._so_count > 1:
+                                    import random
+                                    REPLACEMENTS = ["Yeah,", "Right,", "Honestly,", "Well,", ""]
+                                    rep = random.choice(REPLACEMENTS)
+                                    cleaned = cleaned[2:].lstrip().lstrip(",").lstrip()
+                                    if rep:
+                                        cleaned = rep + " " + cleaned[0].lower() + cleaned[1:] if cleaned else rep
+                                    elif cleaned:
+                                        cleaned = cleaned[0].upper() + cleaned[1:]
+                            else:
+                                self._so_count = 0
+                            first_sentence = cleaned
                             # Got first sentence — send to TTS NOW
                             try:
                                 await cart_ws.send(_make_first_msg(first_sentence))
