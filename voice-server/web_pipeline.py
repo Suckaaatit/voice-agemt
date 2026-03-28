@@ -445,9 +445,10 @@ class WebPipeline:
                                        "no i", "no what", "no but", "yeah but", "okay but", "okay so",
                                        "so tell", "what is", "how is", "where is", "who is", "when is",
                                        "do you", "are you", "is it", "can i", "should i", "will you",
-                                       "let me", "hold on", "wait", "actually", "the thing is"]
+                                       "let me", "hold on", "wait", "actually", "the thing is",
+                                       "for example", "for instance", "let's say", "suppose"]
                         is_mid = ends_with_comma or last_word in MID_SENTENCE or any(pending.lower().rstrip(".,!?").endswith(p) for p in MID_PHRASES)
-                        delay = 1.5 if is_mid else 0.4
+                        delay = 2.5 if is_mid else 0.4
 
                     self._pending_gen += 1
                     gen = self._pending_gen
