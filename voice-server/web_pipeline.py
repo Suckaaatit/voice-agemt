@@ -125,9 +125,25 @@ class WebPipeline:
         self._response_seq: int = 0
         self._valid_seqs: set = set()
 
-        # Backchanneling — play "mm-hmm" after 5s of continuous user speech
+        # ── Silero VAD ──
+        try:
+            from silero_vad import load_silero_vad
+            self._vad_model = load_silero_vad()
+            logger.info("Silero VAD loaded")
+        except Exception as e:
+            logger.warning("Silero VAD not available: %s", e)
+            self._vad_model = None
+        self._vad_speaking: bool = False
+        self._vad_speech_start: float = 0.0
+
+        # ── Energy-based emotion detection ──
+        self._energy_history: list = []
+        self._user_emotion: str = "neutral"
+
+        # ── Context-aware backchanneling ──
         self._user_speaking_since: float = 0.0
         self._backchannel_played: bool = False
+        self._last_backchannel_time: float = 0.0
 
         # Transcript accumulation — prevents splitting "okay, how did you get my number?" into two
         self._pending_transcript: str = ""
@@ -200,6 +216,38 @@ class WebPipeline:
                         # First byte = isTTSPlaying flag from browser
                         self._tts_playing_on_client = (audio[0] == 1)
                         pcm_data = audio[1:]
+                        # ── Silero VAD: detect speech in real-time ──
+                        if self._vad_model and len(pcm_data) >= 512:
+                            try:
+                                import torch
+                                audio_tensor = torch.frombuffer(pcm_data[:512], dtype=torch.int16).float() / 32768.0
+                                speech_prob = self._vad_model(audio_tensor, 16000).item()
+                                was_speaking = self._vad_speaking
+                                self._vad_speaking = speech_prob > 0.5
+                                if self._vad_speaking and not was_speaking:
+                                    self._vad_speech_start = time.time()
+                            except Exception:
+                                pass
+
+                        # ── Energy-based emotion detection ──
+                        if len(pcm_data) >= 64:
+                            import struct as _struct
+                            n_samples = min(len(pcm_data) // 2, 256)
+                            samples = _struct.unpack(f'{n_samples}h', pcm_data[:n_samples * 2])
+                            energy = sum(abs(s) for s in samples) / n_samples
+                            self._energy_history.append(energy)
+                            if len(self._energy_history) > 50:
+                                self._energy_history.pop(0)
+                            if len(self._energy_history) >= 10:
+                                avg = sum(self._energy_history) / len(self._energy_history)
+                                if avg > 0:
+                                    if energy > avg * 2.5:
+                                        self._user_emotion = "frustrated"
+                                    elif energy < avg * 0.2:
+                                        self._user_emotion = "hesitant"
+                                    else:
+                                        self._user_emotion = "neutral"
+
                         # Send all audio to Deepgram + buffer for Smart Turn
                         # Buffer last 8s of audio for ML turn detection
                         self._audio_buffer.extend(pcm_data)
@@ -1044,6 +1092,11 @@ class WebPipeline:
             state_msg += f" | Reframe uses: {self._reframe_count}/3"
         if self._core_question_answered:
             state_msg += " | USER ALREADY ANSWERED: they have a plan/coverage in place. Do NOT ask 'if something happened tonight' again. Move to comparing their plan vs yours, or pricing, or closing."
+        # Inject user emotion for tone adaptation
+        if self._user_emotion == "frustrated":
+            state_msg += " | USER SOUNDS FRUSTRATED. Be extra gentle, warm, and patient. Acknowledge their frustration before responding."
+        elif self._user_emotion == "hesitant":
+            state_msg += " | USER SOUNDS HESITANT. Be encouraging and reassuring. Give them space to think."
 
         # Track topics already discussed to prevent re-asking
         discussed = []
@@ -1492,25 +1545,56 @@ Only one tag per response. Tag goes FIRST, before the text.
     BACKCHANNEL_PHRASES = ["mm-hmm.", "right.", "yeah.", "got it."]
 
     async def _backchanneling_monitor(self):
-        """Play 'mm-hmm' / 'yeah' after 5s of continuous user speech."""
+        """Context-aware backchanneling using VAD + emotion + content analysis."""
         while not self._shutdown.is_set():
-            await asyncio.sleep(1)
-            if self._speaking.is_set() or not self._user_speaking_since:
-                continue
-            if self._backchannel_played:
+            await asyncio.sleep(0.5)
+            if self._speaking.is_set():
                 continue
 
-            speaking_duration = time.time() - self._user_speaking_since
-            if speaking_duration >= 5.0:
-                # User has been talking for 5+ seconds — play acknowledgment
-                import random
-                phrase = random.choice(self.BACKCHANNEL_PHRASES)
-                self._backchannel_played = True
-                logger.debug("Backchanneling: '%s' after %.1fs of user speech", phrase, speaking_duration)
-                try:
-                    await self._speak(phrase)
-                except Exception:
-                    pass
+            # Check VAD-based speech duration (more reliable than Deepgram)
+            now = time.time()
+            if self._vad_model and self._vad_speaking:
+                speaking_duration = now - self._vad_speech_start if self._vad_speech_start else 0
+            elif self._user_speaking_since:
+                speaking_duration = now - self._user_speaking_since
+            else:
+                continue
+
+            # Conditions for backchanneling
+            if speaking_duration < 3.0:
+                continue  # Too early
+            if self._backchannel_played:
+                continue  # Already played this turn
+            if now - self._last_backchannel_time < 8.0:
+                continue  # Min 8s gap between backchannels
+
+            # Don't backchannel if user is asking a question
+            partial = self._last_interim_text.lower() if self._last_interim_text else ""
+            if "?" in partial:
+                continue  # They're asking — respond properly, don't backchannel
+
+            # Context-aware backchannel selection
+            import random
+            if self._user_emotion == "frustrated":
+                phrases = ["Yeah, I hear you", "Right, right", "No, that makes sense"]
+            elif any(w in partial for w in ["problem", "issue", "hard", "difficult", "expensive", "cost"]):
+                phrases = ["Yeah, that's fair", "Right, I get that", "Mm-hmm"]
+            elif any(w in partial for w in ["good", "great", "nice", "works", "covered", "plan"]):
+                phrases = ["Nice", "That's great", "Cool"]
+            elif self._user_emotion == "hesitant":
+                phrases = ["Take your time", "Yeah", "No rush"]
+            else:
+                phrases = ["Mm-hmm", "Right", "Yeah", "Got it"]
+
+            phrase = random.choice(phrases)
+            self._backchannel_played = True
+            self._last_backchannel_time = now
+            logger.info("Backchannel (%s, emotion=%s): '%s' after %.1fs",
+                        "VAD" if self._vad_model else "timer", self._user_emotion, phrase, speaking_duration)
+            try:
+                await self._speak(phrase)
+            except Exception:
+                pass
 
     # ─── Deepgram Utterance Timeout Monitor ──────────────────────
 
