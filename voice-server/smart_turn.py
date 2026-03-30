@@ -137,11 +137,16 @@ def predict_turn_complete(text: str = "", audio_pcm_16k=None) -> dict:
 def get_dynamic_delay(probability: float) -> float:
     """Convert completion probability to wait delay.
 
-    High probability (done) → short delay (0.8s)
-    Low probability (not done) → long delay (2.0s)
+    High probability (done speaking) → short delay (0.3s)
+    Low probability (still talking) → longer delay (1.5s)
 
-    Minimum 0.8s gives time for "No. What I'm saying is..." to arrive
-    as a continuation before we respond to just "No."
+    Optimized for speed — rely on Smart Turn accuracy.
     """
-    delay = 0.8 + (1.0 - probability) * 1.2
-    return round(min(max(delay, 0.8), 2.0), 2)
+    if probability > 0.9:
+        return 0.3  # Very confident they're done — respond fast
+    elif probability > 0.7:
+        return 0.5  # Probably done
+    elif probability > 0.5:
+        return 0.8  # Unclear — wait a bit
+    else:
+        return 1.2  # Probably not done — wait for more

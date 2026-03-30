@@ -286,8 +286,8 @@ class WebPipeline:
         url = (
             "wss://api.deepgram.com/v1/listen?"
             "encoding=linear16&sample_rate=16000&channels=1"
-            "&model=nova-3&smart_format=true&endpointing=300"
-            "&interim_results=true&utterance_end_ms=1000"
+            "&model=nova-3&smart_format=false&endpointing=200"
+            "&interim_results=true&utterance_end_ms=800"
         )
         self.dg_ws = await websockets.connect(
             url,
@@ -466,14 +466,13 @@ class WebPipeline:
                         result = predict_turn_complete(text=accumulated)
                         delay = get_dynamic_delay(result["probability"])
 
-                        # For longer accumulated text (5+ words), add extra delay
-                        # because the user is clearly in the middle of a thought
+                        # Reduced delays for speed — Smart Turn is accurate enough
                         if acc_words >= 5 and not result["complete"]:
-                            delay = max(delay, 2.0)  # At least 2s for long incomplete
+                            delay = max(delay, 1.2)  # Mid-thought, wait a bit
                         elif acc_words >= 5 and result["complete"]:
-                            delay = max(delay, 1.2)  # At least 1.2s even if "complete" — catch continuations
+                            delay = max(delay, 0.5)  # Complete long sentence — go fast
                         elif acc_words >= 3 and result["probability"] < 0.8:
-                            delay = max(delay, 1.5)  # Ambiguous short text — wait longer
+                            delay = max(delay, 0.8)  # Ambiguous — brief wait
 
                         logger.info("Smart Turn: complete=%s prob=%.2f delay=%.2fs words=%d transcript='%s'",
                                     result["complete"], result["probability"], delay, acc_words, accumulated[:50])
@@ -753,19 +752,19 @@ class WebPipeline:
         self._agent_speak_start = time.time()
         await self._send_event("agent_talking", {"value": True})
 
-        # Play filler while LLM starts generating
-        filler = random.choice(FILLERS)
-        await self._speak(filler)
-
         self._response_seq += 1
         my_seq = self._response_seq
-        self._valid_seqs.clear()  # Invalidate all old responses
+        self._valid_seqs.clear()
         self._valid_seqs.add(my_seq)
 
         turn_start = time.time()
         llm_first_token_time = None
         tts_first_audio_time = None
         full_response = ""
+
+        # Play filler while LLM starts — filler is short (~200ms TTS)
+        filler = random.choice(FILLERS)
+        filler_task = asyncio.create_task(self._speak(filler))
 
         try:
             cartesia_key = config.get("cartesia_api_key", "")
@@ -775,6 +774,12 @@ class WebPipeline:
                 f"?api_key={cartesia_key}&cartesia_version=2025-04-16"
             )
             context_id = f"ctx-{self.call_id[:8]}-{self._turn_count}"
+
+            # Wait for filler to finish, then open Cartesia for the real response
+            try:
+                await asyncio.wait_for(filler_task, timeout=1.5)
+            except (asyncio.TimeoutError, Exception):
+                pass
 
             async with websockets.connect(url) as cart_ws:
                 audio_done = asyncio.Event()
@@ -1207,7 +1212,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             # No tools — agent just talks, all actions done manually
             "temperature": 0.4,
             # First 2 turns need more tokens for pitch context, then shorter
-            "max_tokens": 80 if self._turn_count <= 2 else 60,
+            "max_tokens": 60 if self._turn_count <= 2 else 45,
             "stream": True,
         }
 
@@ -1251,7 +1256,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 80 if self._turn_count <= 2 else 60,
+            "max_tokens": 60 if self._turn_count <= 2 else 45,
         }
         async with self.http_session.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -1275,7 +1280,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 80 if self._turn_count <= 2 else 60,
+            "max_tokens": 60 if self._turn_count <= 2 else 45,
         }
         async with self.http_session.post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -1298,7 +1303,7 @@ Only one tag per response. Tag goes FIRST, before the text.
             "messages": messages,
             # No tools — conversation only
             "temperature": 0.4,
-            "max_tokens": 80 if self._turn_count <= 2 else 60,
+            "max_tokens": 60 if self._turn_count <= 2 else 45,
         }
         async with self.http_session.post(
             "https://api.openai.com/v1/chat/completions",
