@@ -286,13 +286,13 @@ class WebPipeline:
         url = (
             "wss://api.deepgram.com/v1/listen?"
             "encoding=linear16&sample_rate=16000&channels=1"
-            "&model=nova-3&smart_format=false&endpointing=200"
+            "&model=nova-2&smart_format=true&endpointing=200"
             "&interim_results=true&utterance_end_ms=800"
         )
         self.dg_ws = await websockets.connect(
             url,
             additional_headers={"Authorization": f"Token {config['deepgram_api_key']}"},
-            ping_interval=8,
+            ping_interval=None,
         )
         logger.info("Deepgram connected: call_id=%s", self.call_id)
 
